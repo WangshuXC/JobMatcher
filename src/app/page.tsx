@@ -50,9 +50,6 @@ export default function HomePage() {
               <h1 className="text-xl font-bold tracking-tight">
                 JobMatcher
               </h1>
-              <p className="text-sm text-muted-foreground">
-                AI 驱动的招聘信息聚合与智能简历匹配平台
-              </p>
             </div>
           </motion.div>
         </div>

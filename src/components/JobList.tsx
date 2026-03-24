@@ -65,6 +65,12 @@ export default function JobList({ refreshTrigger }: JobListProps) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
 
+  // 用 ref 保存当前筛选条件，以便 refreshTrigger 触发时能读取最新值
+  const filtersRef = useRef({ source: null as string | null, keyword: "", location: "__all__" });
+  useEffect(() => {
+    filtersRef.current = { source: selectedSource, keyword, location: selectedLocation };
+  }, [selectedSource, keyword, selectedLocation]);
+
   /** 重置滚动位置到顶部 */
   const scrollToTop = useCallback(() => {
     // ScrollArea 的 viewport 是内部的 [data-slot="scroll-area-viewport"] div
@@ -76,6 +82,7 @@ export default function JobList({ refreshTrigger }: JobListProps) {
     }
   }, []);
 
+  /** 通用请求函数：根据筛选条件拉取职位数据 */
   const fetchJobs = useCallback(async (source: string | null, kw: string, location: string | null) => {
     const params = new URLSearchParams();
     if (source) params.set("source", source);
@@ -95,12 +102,18 @@ export default function JobList({ refreshTrigger }: JobListProps) {
     }
   }, [scrollToTop]);
 
-  // 组件挂载和 refreshTrigger 变化时拉取数据
+  // 组件挂载和 refreshTrigger 变化时拉取数据（保留当前筛选条件）
   useEffect(() => {
     let cancelled = false;
 
     const loadJobs = async () => {
-      const response = await fetch("/api/jobs");
+      const { source, keyword: kw, location } = filtersRef.current;
+      const params = new URLSearchParams();
+      if (source) params.set("source", source);
+      if (kw) params.set("keyword", kw);
+      if (location && location !== "__all__") params.set("location", location);
+
+      const response = await fetch(`/api/jobs?${params.toString()}`);
       const data = await response.json();
       if (!cancelled && data.success) {
         setJobs(data.data.jobs);
@@ -163,9 +176,6 @@ export default function JobList({ refreshTrigger }: JobListProps) {
                   清除数据
                 </Button>
               )}
-              <Badge variant="secondary" className="text-sm">
-                共 {jobs.length} 个职位
-              </Badge>
             </div>
           </CardTitle>
         </CardHeader>

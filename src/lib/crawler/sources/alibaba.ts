@@ -21,7 +21,7 @@
  *   - 钉钉 (talent.dingtalk.com)
  *   - 通义实验室 (careers-tongyi.alibaba.com)
  */
-import { Page, Route } from "playwright";
+import { Page, Response as PWResponse } from "playwright";
 import { BaseCrawler } from "../base";
 import { JobPosting, CrawlerSource } from "@/types";
 
@@ -111,10 +111,10 @@ interface AliSearchResponse {
   } | null;
 }
 
-/** 路由拦截器接口 */
-interface RouteInterceptor {
+/** 响应监听器接口 */
+interface ResponseListener {
   waitForResponse: () => Promise<AliSearchResponse | null>;
-  cleanup: () => Promise<void>;
+  cleanup: () => void;
 }
 
 export class AlibabaCrawler extends BaseCrawler {
@@ -129,55 +129,64 @@ export class AlibabaCrawler extends BaseCrawler {
   };
 
   /**
-   * 设置路由拦截，监听 /position/search 请求的响应
-   * 返回一个 Promise，在拦截到响应后 resolve
+   * 设置响应监听器，通过 page.on('response') 监听 /position/search API 响应。
+   *
+   * 之前使用 page.route() + route.fetch() + route.fulfill() 拦截模式，
+   * 但 route.fetch() 使用 Node.js 网络栈重新发起请求，部分子站（如淘天集团）
+   * 的服务器存在 TLS 版本兼容问题，导致 SSL 握手失败（EPROTO ssl3_get_record wrong version number）。
+   *
+   * 改为 page.on('response') 被动监听模式，不干预原始请求/响应流，
+   * 直接从浏览器返回的响应中读取数据，彻底规避 SSL 兼容性问题。
    */
-  private setupRouteInterceptor(
+  private setupResponseListener(
     page: Page
-  ): RouteInterceptor {
-    let resolveResponse: (data: AliSearchResponse | null) => void;
-    let responsePromise = new Promise<AliSearchResponse | null>((resolve) => {
-      resolveResponse = resolve;
-    });
+  ): ResponseListener {
+    // 使用队列模式：handler 将结果推入队列，waitForResponse 从队列取出
+    const dataQueue: AliSearchResponse[] = [];
+    let pendingResolve: ((data: AliSearchResponse | null) => void) | null = null;
 
-    const handler = async (route: Route) => {
+    const handler = async (response: PWResponse) => {
+      const url = response.url();
+      if (!url.includes("/position/search")) return;
+
       try {
-        // 放行请求，但拦截响应
-        const response = await route.fetch();
         const body = await response.text();
+        const data = JSON.parse(body) as AliSearchResponse;
 
-        try {
-          const data = JSON.parse(body) as AliSearchResponse;
-          resolveResponse(data);
-        } catch {
-          resolveResponse(null);
+        if (pendingResolve) {
+          // 有等待中的 waitForResponse 调用，直接 resolve
+          const resolve = pendingResolve;
+          pendingResolve = null;
+          resolve(data);
+        } else {
+          // 没有等待者，入队
+          dataQueue.push(data);
         }
-
-        // 把响应传递回页面
-        await route.fulfill({
-          response,
-          body,
-        });
-      } catch (err) {
-        console.error("[阿里巴巴] 路由拦截异常:", err);
-        resolveResponse(null);
-        await route.continue();
+      } catch {
+        if (pendingResolve) {
+          const resolve = pendingResolve;
+          pendingResolve = null;
+          resolve(null);
+        }
       }
     };
 
-    page.route("**/position/search**", handler);
+    page.on("response", handler);
 
     return {
       waitForResponse: () => {
-        const current = responsePromise;
-        // 为下一次请求重置 promise
-        responsePromise = new Promise<AliSearchResponse | null>((resolve) => {
-          resolveResponse = resolve;
+        // 如果队列中已有数据（handler 先于 waitForResponse 调用的情况），直接返回
+        if (dataQueue.length > 0) {
+          return Promise.resolve(dataQueue.shift()!);
+        }
+        // 否则等待下一个 handler 触发
+        return new Promise<AliSearchResponse | null>((resolve) => {
+          pendingResolve = resolve;
         });
-        return current;
       },
-      cleanup: async () => {
-        await page.unroute("**/position/search**", handler);
+      cleanup: () => {
+        page.off("response", handler);
+        pendingResolve = null;
       },
     };
   }
@@ -210,21 +219,21 @@ export class AlibabaCrawler extends BaseCrawler {
 
   /**
    * 访问子站社招列表页，等待初始 API 响应
-   * 返回初始数据 + 拦截器
+   * 返回初始数据 + 监听器
    */
   private async initSubsite(
     page: Page,
     subsite: AliSubsite
   ): Promise<{
     initialData: AliSearchResponse | null;
-    interceptor: RouteInterceptor;
+    listener: ResponseListener;
   } | null> {
     const url = `${subsite.domain}${subsite.listPath}`;
     console.log(`[阿里巴巴] 初始化子站 ${subsite.name}: ${url}`);
 
     try {
-      // 先设置路由拦截器
-      const interceptor = this.setupRouteInterceptor(page);
+      // 先设置响应监听器
+      const listener = this.setupResponseListener(page);
 
       // 导航到页面
       await this.safeGoto(page, url);
@@ -234,7 +243,7 @@ export class AlibabaCrawler extends BaseCrawler {
         setTimeout(() => resolve(null), 20000)
       );
       const initialData = await Promise.race([
-        interceptor.waitForResponse(),
+        listener.waitForResponse(),
         timeoutPromise,
       ]);
 
@@ -242,7 +251,7 @@ export class AlibabaCrawler extends BaseCrawler {
         console.log(
           `[阿里巴巴] ${subsite.name} 初始数据获取失败`
         );
-        await interceptor.cleanup();
+        listener.cleanup();
         return null;
       }
 
@@ -250,7 +259,7 @@ export class AlibabaCrawler extends BaseCrawler {
         `[阿里巴巴] ${subsite.name} 初始化成功: 共 ${initialData.content.totalCount} 个职位`
       );
 
-      return { initialData, interceptor };
+      return { initialData, listener };
     } catch (err) {
       console.error(`[阿里巴巴] 初始化子站 ${subsite.name} 失败:`, err);
       return null;
@@ -307,90 +316,114 @@ export class AlibabaCrawler extends BaseCrawler {
 
       console.log(`\n[阿里巴巴] === ${subsite.name} ===`);
 
-      const result = await this.initSubsite(page, subsite);
-      if (!result) {
-        console.log(`[阿里巴巴] 跳过 ${subsite.name}（初始化失败）`);
-        continue;
-      }
+      // 每个子站独立 try-catch，一个子站异常不影响后续子站
+      let listener: ResponseListener | null = null;
+      try {
+        const result = await this.initSubsite(page, subsite);
+        if (!result) {
+          console.log(`[阿里巴巴] 跳过 ${subsite.name}（初始化失败）`);
+          continue;
+        }
 
-      const { initialData, interceptor } = result;
+        const { initialData } = result;
+        listener = result.listener;
 
-      let subsiteCount = 0;
-      let currentPage = 1;
-      const totalCount = initialData!.content!.totalCount;
-      const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+        let subsiteCount = 0;
+        let currentPage = 1;
+        const totalCount = initialData!.content!.totalCount;
+        const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-      // 处理第一页数据（已通过初始加载拦截到）
-      console.log(
-        `[阿里巴巴] ${subsite.name} 第 1/${totalPages} 页 (共 ${totalCount} 个职位)`
-      );
-      const firstPageJobs = this.processPositions(
-        initialData!.content!.datas,
-        subsite,
-        seenIds
-      );
-      allJobs.push(...firstPageJobs);
-      subsiteCount += firstPageJobs.length;
-
-      // 调用回调推送第一批数据
-      if (firstPageJobs.length > 0 && this.onJobsBatch) {
-        this.onJobsBatch(firstPageJobs.map((j) => this.partialToFull(j)));
-      }
-
-      // 翻页获取更多数据 — 遍历所有页面直到数据耗尽或达到 maxJobs
-      while (currentPage < totalPages && allJobs.length < maxJobs) {
-        currentPage++;
+        // 处理第一页数据（已通过初始加载拦截到）
         console.log(
-          `[阿里巴巴] ${subsite.name} 第 ${currentPage}/${totalPages} 页`
+          `[阿里巴巴] ${subsite.name} 第 1/${totalPages} 页 (共 ${totalCount} 个职位)`
         );
-
-        // 点击下一页
-        const hasNext = await this.clickNextPage(page);
-        if (!hasNext) {
-          console.log(`[阿里巴巴] ${subsite.name} 无更多页面`);
-          break;
-        }
-
-        // 等待 API 响应
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 15000)
-        );
-        const pageData = await Promise.race([
-          interceptor.waitForResponse(),
-          timeoutPromise,
-        ]);
-
-        if (!pageData?.content?.datas || pageData.content.datas.length === 0) {
+        const firstPageDatas = initialData!.content!.datas;
+        if (!Array.isArray(firstPageDatas) || firstPageDatas.length === 0) {
           console.log(
-            `[阿里巴巴] ${subsite.name} 第 ${currentPage} 页无数据，停止`
+            `[阿里巴巴] ${subsite.name} 第 1 页 datas 为空或格式异常，跳过`
           );
-          break;
+          listener.cleanup();
+          listener = null;
+          continue;
         }
-
-        const pageJobs = this.processPositions(
-          pageData.content.datas,
+        const firstPageJobs = this.processPositions(
+          firstPageDatas,
           subsite,
           seenIds
         );
-        allJobs.push(...pageJobs);
-        subsiteCount += pageJobs.length;
+        allJobs.push(...firstPageJobs);
+        subsiteCount += firstPageJobs.length;
 
-        // 调用回调推送这批数据
-        if (pageJobs.length > 0 && this.onJobsBatch) {
-          this.onJobsBatch(pageJobs.map((j) => this.partialToFull(j)));
+        // 调用回调推送第一批数据
+        if (firstPageJobs.length > 0 && this.onJobsBatch) {
+          this.onJobsBatch(firstPageJobs.map((j) => this.partialToFull(j)));
         }
 
-        if (allJobs.length >= maxJobs) break;
+        // 翻页获取更多数据 — 遍历所有页面直到数据耗尽或达到 maxJobs
+        while (currentPage < totalPages && allJobs.length < maxJobs) {
+          currentPage++;
+          console.log(
+            `[阿里巴巴] ${subsite.name} 第 ${currentPage}/${totalPages} 页`
+          );
 
-        // 翻页延迟
-        await this.randomDelay(800, 1500);
+          // 点击下一页
+          const hasNext = await this.clickNextPage(page);
+          if (!hasNext) {
+            console.log(`[阿里巴巴] ${subsite.name} 无更多页面`);
+            break;
+          }
+
+          // 等待 API 响应
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), 15000)
+          );
+          const pageData = await Promise.race([
+            listener.waitForResponse(),
+            timeoutPromise,
+          ]);
+
+          if (!pageData?.content?.datas || pageData.content.datas.length === 0) {
+            console.log(
+              `[阿里巴巴] ${subsite.name} 第 ${currentPage} 页无数据，停止`
+            );
+            break;
+          }
+
+          const pageJobs = this.processPositions(
+            pageData.content.datas,
+            subsite,
+            seenIds
+          );
+          allJobs.push(...pageJobs);
+          subsiteCount += pageJobs.length;
+
+          // 调用回调推送这批数据
+          if (pageJobs.length > 0 && this.onJobsBatch) {
+            this.onJobsBatch(pageJobs.map((j) => this.partialToFull(j)));
+          }
+
+          if (allJobs.length >= maxJobs) break;
+
+          // 翻页延迟
+          await this.randomDelay(800, 1500);
+        }
+
+        listener.cleanup();
+        listener = null;
+
+        console.log(
+          `[阿里巴巴] ${subsite.name} 获取 ${subsiteCount} 个社招职位`
+        );
+      } catch (err) {
+        console.error(
+          `[阿里巴巴] ${subsite.name} 爬取异常（已获取 ${allJobs.length} 个职位，继续下一子站）:`,
+          err
+        );
+        // 确保 listener 被清理
+        if (listener) {
+          try { listener.cleanup(); } catch { /* ignore */ }
+        }
       }
-
-      await interceptor.cleanup();
-
-      console.log(
-        `[阿里巴巴] ${subsite.name} 获取 ${subsiteCount} 个社招职位`
-      );
 
       // 子站间延迟
       await this.randomDelay(1500, 3000);
@@ -411,6 +444,15 @@ export class AlibabaCrawler extends BaseCrawler {
     seenIds: Set<string>
   ): Partial<JobPosting>[] {
     const jobs: Partial<JobPosting>[] = [];
+
+    // 防御性检查：API 返回的 datas 可能为 undefined/null/非数组
+    if (!Array.isArray(positions)) {
+      console.warn(
+        `[阿里巴巴] ${subsite.name} positions 非数组:`,
+        typeof positions
+      );
+      return jobs;
+    }
 
     for (const pos of positions) {
       const jobId = String(pos.id);

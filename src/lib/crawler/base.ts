@@ -157,6 +157,10 @@ export abstract class BaseCrawler {
 
   /**
    * 执行完整的爬取流程
+   *
+   * 容错策略：crawlJobList 和 crawlDetailsInParallel 分别 try-catch，
+   * 任何阶段中途失败都会保留已爬取的数据（通过 onJobsBatch 增量推送 + 存储）。
+   *
    * @param maxJobs - 最大抓取岗位数量（0 或不传表示全部抓取）
    * @param concurrency - 详情并行抓取并发数
    */
@@ -164,8 +168,19 @@ export abstract class BaseCrawler {
     const startTime = Date.now();
     let status: CrawlerStatus = "running";
     let jobs: JobPosting[] = [];
+    let errorMsg = "";
     // maxJobs <= 0 表示不限制，用 Infinity 方便比较
     const effectiveMax = maxJobs > 0 ? maxJobs : Infinity;
+
+    // 跟踪通过 onJobsBatch 已推送的职位数（用于异常时统计）
+    let pushedJobCount = 0;
+    const originalCallback = this.onJobsBatch;
+    if (originalCallback) {
+      this.onJobsBatch = (batchJobs: JobPosting[]) => {
+        pushedJobCount += batchJobs.length;
+        originalCallback(batchJobs);
+      };
+    }
 
     console.log(`[${this.source.name}] 开始爬取，目标 ${maxJobs > 0 ? maxJobs + ' 个岗位' : '全部岗位'}...`);
 
@@ -173,41 +188,65 @@ export abstract class BaseCrawler {
       await this.launchBrowser();
       const page = await this.newPage();
 
-      // 第一步：获取职位列表（根据 effectiveMax 自动计算需要的页数）
+      // 第一步：获取职位列表
+      let partialJobs: Partial<JobPosting>[] = [];
       console.log(`[${this.source.name}] 正在抓取职位列表...`);
-      const partialJobs = await this.crawlJobList(page, effectiveMax);
-      console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
+      try {
+        partialJobs = await this.crawlJobList(page, effectiveMax);
+        console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
+      } catch (err) {
+        // crawlJobList 中途失败：记录错误但不终止，继续处理已获取的列表数据
+        errorMsg = `列表抓取中断: ${err instanceof Error ? err.message : String(err)}`;
+        console.error(`[${this.source.name}] ${errorMsg}`);
+        console.log(`[${this.source.name}] 已通过增量回调推送 ${pushedJobCount} 个职位`);
+      }
 
       // 关闭列表页
       await page.close();
 
-      // 第二步：并行抓取详情
-      console.log(`[${this.source.name}] 开始并行抓取详情（并发数: ${concurrency}）...`);
-      jobs = await this.crawlDetailsInParallel(partialJobs, concurrency);
+      // 第二步：并行抓取详情（仅对未通过 onJobsBatch 推送的数据执行）
+      if (partialJobs.length > 0) {
+        console.log(`[${this.source.name}] 开始并行抓取详情（并发数: ${concurrency}）...`);
+        try {
+          jobs = await this.crawlDetailsInParallel(partialJobs, concurrency);
+        } catch (err) {
+          const detailErr = `详情抓取中断: ${err instanceof Error ? err.message : String(err)}`;
+          errorMsg = errorMsg ? `${errorMsg}; ${detailErr}` : detailErr;
+          console.error(`[${this.source.name}] ${detailErr}`);
+        }
+      }
 
-      status = "completed";
-      console.log(`[${this.source.name}] 爬取完成，共 ${jobs.length} 个职位`);
+      // 综合判定状态：有错误但有数据 → partial，有错误且无数据 → error，无错误 → completed
+      const totalJobCount = Math.max(jobs.length, pushedJobCount);
+      if (errorMsg) {
+        status = totalJobCount > 0 ? "completed" : "error";
+      } else {
+        status = "completed";
+      }
+
+      const message = errorMsg
+        ? `抓取部分完成（${totalJobCount} 个职位），${errorMsg}`
+        : `成功抓取 ${jobs.length} 个职位`;
+      console.log(`[${this.source.name}] ${message}`);
     } catch (err) {
+      // 浏览器启动等全局错误
       status = "error";
-      console.error(`[${this.source.name}] 爬取失败:`, err);
-
-      return {
-        source: this.source.id,
-        status,
-        jobCount: jobs.length,
-        message: `爬取失败: ${err instanceof Error ? err.message : String(err)}`,
-        duration: Date.now() - startTime,
-        jobs,
-      };
+      errorMsg = `爬取失败: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[${this.source.name}] ${errorMsg}`);
     } finally {
       await this.closeBrowser();
+      // 恢复原始回调
+      this.onJobsBatch = originalCallback;
     }
 
+    const totalJobCount = Math.max(jobs.length, pushedJobCount);
     return {
       source: this.source.id,
       status,
-      jobCount: jobs.length,
-      message: `成功抓取 ${jobs.length} 个职位`,
+      jobCount: totalJobCount,
+      message: errorMsg
+        ? `抓取部分完成（${totalJobCount} 个职位），${errorMsg}`
+        : `成功抓取 ${jobs.length} 个职位`,
       duration: Date.now() - startTime,
       jobs,
     };
