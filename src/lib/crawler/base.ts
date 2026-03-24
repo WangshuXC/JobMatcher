@@ -3,11 +3,14 @@
  *
  * 新增数据源只需：
  * 1. 在 sources/ 下新建文件继承 BaseCrawler
- * 2. 实现 crawlJobList 和 crawlJobDetail 方法
+ * 2. 实现 fetchMeta、crawlJobList 和 crawlJobDetail 方法
  * 3. 在 registry.ts 中注册
  */
 import { chromium, Browser, Page, BrowserContext } from "playwright";
-import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus } from "@/types";
+import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus, SourceMeta } from "@/types";
+
+/** 并行抓取的默认并发数 */
+const DEFAULT_CONCURRENCY = 5;
 
 export abstract class BaseCrawler {
   protected browser: Browser | null = null;
@@ -62,12 +65,19 @@ export abstract class BaseCrawler {
   }
 
   /**
+   * 获取数据源元数据（总页数、每页条数、总职位数）
+   * 子类必须实现，通过访问招聘列表页第一页获取分页信息
+   */
+  abstract fetchMeta(): Promise<SourceMeta>;
+
+  /**
    * 抓取职位列表 - 返回基本信息和详情页URL列表
-   * 子类必须实现
+   * @param page - 浏览器页面
+   * @param maxJobs - 最大抓取岗位数量
    */
   protected abstract crawlJobList(
     page: Page,
-    maxPages: number
+    maxJobs: number
   ): Promise<Partial<JobPosting>[]>;
 
   /**
@@ -80,46 +90,91 @@ export abstract class BaseCrawler {
   ): Promise<JobPosting>;
 
   /**
-   * 执行完整的爬取流程
+   * 并行抓取多个职位详情
+   * @param partialJobs - 待抓取详情的职位列表
+   * @param concurrency - 并发数
    */
-  async crawl(maxPages: number = 1): Promise<CrawlResult> {
-    const startTime = Date.now();
-    let status: CrawlerStatus = "running";
+  private async crawlDetailsInParallel(
+    partialJobs: Partial<JobPosting>[],
+    concurrency: number = DEFAULT_CONCURRENCY
+  ): Promise<JobPosting[]> {
     const jobs: JobPosting[] = [];
+    const total = partialJobs.length;
 
-    console.log(`[${this.source.name}] 开始爬取...`);
+    // 分批并行抓取
+    for (let i = 0; i < total; i += concurrency) {
+      const batch = partialJobs.slice(i, i + concurrency);
+      const batchIndex = Math.floor(i / concurrency) + 1;
+      const totalBatches = Math.ceil(total / concurrency);
 
-    try {
-      await this.launchBrowser();
-      const page = await this.newPage();
+      console.log(
+        `[${this.source.name}] 并行抓取详情 批次 ${batchIndex}/${totalBatches}（每批 ${batch.length} 个）`
+      );
 
-      // 第一步：获取职位列表
-      console.log(`[${this.source.name}] 正在抓取职位列表...`);
-      const partialJobs = await this.crawlJobList(page, maxPages);
-      console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
-
-      // 第二步：逐个抓取详情
-      for (let i = 0; i < partialJobs.length; i++) {
-        const partial = partialJobs[i];
-        console.log(
-          `[${this.source.name}] 抓取详情 (${i + 1}/${partialJobs.length}): ${partial.title}`
-        );
-
+      // 为每个任务创建独立的 page 并并发执行
+      const promises = batch.map(async (partial, idx) => {
+        const page = await this.newPage();
         try {
+          console.log(
+            `[${this.source.name}] 抓取详情 (${i + idx + 1}/${total}): ${partial.title}`
+          );
           const job = await this.crawlJobDetail(page, partial);
-          jobs.push(job);
+          return job;
         } catch (err) {
           console.error(
             `[${this.source.name}] 抓取详情失败: ${partial.title}`,
             err
           );
+          return null;
+        } finally {
+          await page.close();
         }
+      });
 
-        // 请求间隔
-        if (i < partialJobs.length - 1) {
-          await this.randomDelay(1500, 3000);
+      const results = await Promise.all(promises);
+
+      for (const job of results) {
+        if (job) {
+          jobs.push(job);
         }
       }
+
+      // 批次间随机延迟防反爬
+      if (i + concurrency < total) {
+        await this.randomDelay(1000, 2000);
+      }
+    }
+
+    return jobs;
+  }
+
+  /**
+   * 执行完整的爬取流程
+   * @param maxJobs - 最大抓取岗位数量（默认 10）
+   * @param concurrency - 详情并行抓取并发数
+   */
+  async crawl(maxJobs: number = 10, concurrency: number = DEFAULT_CONCURRENCY): Promise<CrawlResult> {
+    const startTime = Date.now();
+    let status: CrawlerStatus = "running";
+    let jobs: JobPosting[] = [];
+
+    console.log(`[${this.source.name}] 开始爬取，目标 ${maxJobs} 个岗位...`);
+
+    try {
+      await this.launchBrowser();
+      const page = await this.newPage();
+
+      // 第一步：获取职位列表（根据 maxJobs 自动计算需要的页数）
+      console.log(`[${this.source.name}] 正在抓取职位列表...`);
+      const partialJobs = await this.crawlJobList(page, maxJobs);
+      console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
+
+      // 关闭列表页
+      await page.close();
+
+      // 第二步：并行抓取详情
+      console.log(`[${this.source.name}] 开始并行抓取详情（并发数: ${concurrency}）...`);
+      jobs = await this.crawlDetailsInParallel(partialJobs, concurrency);
 
       status = "completed";
       console.log(`[${this.source.name}] 爬取完成，共 ${jobs.length} 个职位`);

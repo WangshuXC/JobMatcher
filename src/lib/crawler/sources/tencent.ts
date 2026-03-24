@@ -1,12 +1,54 @@
 /**
  * 腾讯招聘爬虫
- * 目标: https://careers.tencent.com/search.html
  *
- * 预设架构 - 可根据实际页面结构完善
+ * 列表页: https://careers.tencent.com/search.html?query=at_1,ot_40001001,...&keyword=前端
+ * 详情页: https://careers.tencent.com/jobdesc.html?postId=xxx
+ *
+ * 发现腾讯招聘有 JSON API，可直接调用：
+ *   GET /tencentcareer/api/post/Query?categoryId=...&attrId=1&keyword=...&pageIndex=1&pageSize=10&language=zh-cn&area=cn
+ * 返回结构化数据（标题、地点、事业群、职责描述等），无需解析 HTML 列表。
+ *
+ * 详情页 DOM 结构：
+ *   - `.job-recruit-title` → 职位标题
+ *   - `.job-recruit-location` → 地点
+ *   - `.recruit-tips` → 事业群/子公司 | 类别 | 经验 | 更新时间
+ *   - `.duty.work-module .duty-text` → 岗位职责
+ *   - `.requirement.work-module .duty-text` → 岗位要求
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
-import { JobPosting, CrawlerSource } from "@/types";
+import { JobPosting, CrawlerSource, SourceMeta } from "@/types";
+
+const PAGE_SIZE = 10;
+
+/** 腾讯 API 返回的职位数据结构 */
+interface TencentApiPost {
+  PostId: string;
+  RecruitPostId: number;
+  RecruitPostName: string;
+  CountryName: string;
+  LocationName: string;
+  BGName: string;
+  ComName: string;
+  ProductName: string;
+  CategoryName: string;
+  Responsibility: string;
+  LastUpdateTime: string;
+  PostURL: string;
+  SourceID: number;
+  RequireWorkYearsName: string;
+}
+
+interface TencentApiResponse {
+  Code: number;
+  Data: {
+    Count: number;
+    Posts: TencentApiPost[];
+  };
+}
+
+/** 前端相关分类 ID */
+const CATEGORY_IDS = "40001001,40001002,40001003,40001004,40001005,40001006";
 
 export class TencentCrawler extends BaseCrawler {
   readonly source: CrawlerSource = {
@@ -19,155 +61,239 @@ export class TencentCrawler extends BaseCrawler {
     description: "腾讯社会招聘 - 涵盖微信、QQ、云计算等业务线",
   };
 
-  private buildListUrl(pageIndex: number): string {
-    return `${this.source.baseUrl}/search.html?keyword=&locationId=&postId=&categoryId=&parentCategoryId=&attrId=1&index=${pageIndex}`;
+  /**
+   * 构建 API 查询 URL
+   * attrId=1 表示社会招聘
+   */
+  private buildApiUrl(pageIndex: number, keyword: string = "前端"): string {
+    const timestamp = Date.now();
+    const encodedKeyword = encodeURIComponent(keyword);
+    return `${this.source.baseUrl}/tencentcareer/api/post/Query?timestamp=${timestamp}&countryId=&cityId=&bgIds=&productId=&categoryId=${CATEGORY_IDS}&parentCategoryId=&attrId=1&keyword=${encodedKeyword}&pageIndex=${pageIndex}&pageSize=${PAGE_SIZE}&language=zh-cn&area=cn`;
   }
 
-  protected async crawlJobList(
+  /**
+   * 构建详情页 URL
+   */
+  private buildDetailUrl(postId: string): string {
+    return `${this.source.baseUrl}/jobdesc.html?postId=${postId}`;
+  }
+
+  /**
+   * 通过 API 获取职位列表数据
+   */
+  private async fetchApiData(
     page: Page,
-    maxPages: number
-  ): Promise<Partial<JobPosting>[]> {
-    const allJobs: Partial<JobPosting>[] = [];
+    pageIndex: number,
+    keyword: string = "前端"
+  ): Promise<TencentApiResponse | null> {
+    const apiUrl = this.buildApiUrl(pageIndex, keyword);
+    console.log(`[腾讯] 调用 API 第 ${pageIndex} 页: ${apiUrl}`);
 
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      const url = this.buildListUrl(pageNum);
-      console.log(`[腾讯] 抓取第 ${pageNum} 页: ${url}`);
+    try {
+      const response = await page.evaluate(async (url: string) => {
+        const res = await fetch(url);
+        return res.json();
+      }, apiUrl);
 
-      await this.safeGoto(page, url);
-      await this.randomDelay(3000, 5000);
+      if (response?.Code === 200 && response?.Data) {
+        return response as TencentApiResponse;
+      }
+      console.log("[腾讯] API 返回异常:", JSON.stringify(response).substring(0, 200));
+      return null;
+    } catch (err) {
+      console.log("[腾讯] API 调用失败:", err);
+      return null;
+    }
+  }
 
-      // 等待列表渲染
-      await page.waitForSelector(
-        '[class*="recruit-list"], [class*="recruit-wrap"], .recruit-list a, a[href*="position"]',
-        { timeout: 15000 }
-      ).catch(() => {
-        console.log("[腾讯] 等待列表元素超时，尝试继续...");
-      });
+  /**
+   * 获取数据源元数据
+   */
+  async fetchMeta(): Promise<SourceMeta> {
+    try {
+      await this.launchBrowser();
+      const page = await this.newPage();
 
-      const jobItems = await page.evaluate((baseUrl) => {
-        const items: Array<{
-          title: string;
-          detailUrl: string;
-          sourceId: string;
-          location: string;
-        }> = [];
+      // 先访问首页建立 cookie/session
+      await this.safeGoto(page, this.source.baseUrl);
+      await this.randomDelay(1000, 2000);
 
-        // 腾讯招聘列表结构
-        const cards = document.querySelectorAll(
-          '[class*="recruit-list"] a, .recruit-wrap a, a[href*="position"]'
-        );
-        const seen = new Set<string>();
+      const data = await this.fetchApiData(page, 1);
 
-        cards.forEach((card) => {
-          const href = (card as HTMLAnchorElement).href;
-          const match = href.match(/position[/=](\w+)/i);
-          if (!match) return;
+      await page.close();
+      await this.closeBrowser();
 
-          const sourceId = match[1];
-          if (seen.has(sourceId)) return;
-          seen.add(sourceId);
-
-          const titleEl = card.querySelector(
-            '[class*="name"], [class*="title"], h3, h4'
-          );
-          const locationEl = card.querySelector(
-            '[class*="city"], [class*="location"]'
-          );
-
-          items.push({
-            title: titleEl?.textContent?.trim() || "未知职位",
-            detailUrl: href.startsWith("http") ? href : `${baseUrl}${href}`,
-            sourceId,
-            location: locationEl?.textContent?.trim() || "",
-          });
-        });
-
-        return items;
-      }, this.source.baseUrl);
-
-      console.log(`[腾讯] 第 ${pageNum} 页发现 ${jobItems.length} 个职位`);
-
-      for (const item of jobItems) {
-        allJobs.push({
-          title: item.title,
-          source: this.source.id,
-          company: this.source.company,
-          sourceId: item.sourceId,
-          detailUrl: item.detailUrl,
-          location: item.location,
-        });
+      if (data) {
+        const totalJobs = data.Data.Count;
+        return {
+          sourceId: this.source.id,
+          totalJobs,
+          pageSize: PAGE_SIZE,
+          totalPages: Math.ceil(totalJobs / PAGE_SIZE),
+          success: true,
+        };
       }
 
-      if (jobItems.length === 0) break;
+      return {
+        sourceId: this.source.id,
+        totalJobs: 0,
+        pageSize: PAGE_SIZE,
+        totalPages: 0,
+        success: false,
+        error: "API 返回空数据",
+      };
+    } catch (err) {
+      await this.closeBrowser();
+      return {
+        sourceId: this.source.id,
+        totalJobs: 0,
+        pageSize: PAGE_SIZE,
+        totalPages: 0,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
 
+  /**
+   * 通过 API 抓取职位列表
+   */
+  protected async crawlJobList(
+    page: Page,
+    maxJobs: number
+  ): Promise<Partial<JobPosting>[]> {
+    const allJobs: Partial<JobPosting>[] = [];
+    const maxPages = Math.ceil(maxJobs / PAGE_SIZE);
+
+    // 先访问首页建立 cookie/session
+    await this.safeGoto(page, this.source.baseUrl);
+    await this.randomDelay(1000, 2000);
+
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      const data = await this.fetchApiData(page, pageNum);
+
+      if (!data || !data.Data.Posts || data.Data.Posts.length === 0) {
+        console.log(`[腾讯] 第 ${pageNum} 页无数据，停止翻页`);
+        break;
+      }
+
+      console.log(`[腾讯] 第 ${pageNum}/${maxPages} 页获取到 ${data.Data.Posts.length} 个职位`);
+
+      for (const post of data.Data.Posts) {
+        // 判断是否为腾讯内部详情页（SourceID=1）还是外部链接（如 Workday）
+        const isInternal = post.SourceID === 1;
+        const detailUrl = isInternal
+          ? this.buildDetailUrl(post.PostId)
+          : post.PostURL;
+
+        // 事业群信息: BGName + ComName (如果有子公司)
+        const bgInfo = post.ComName
+          ? `${post.BGName} - ${post.ComName}`
+          : post.BGName;
+
+        allJobs.push({
+          title: post.RecruitPostName,
+          source: this.source.id,
+          company: this.source.company,
+          sourceId: post.PostId,
+          detailUrl,
+          location: post.LocationName || "未知",
+          // API 已经提供了职责描述，存入 description
+          description: post.Responsibility?.replace(/\\r\\n|\\n/g, "\n") || "",
+          category: `${bgInfo} | ${post.CategoryName}`,
+        });
+
+        if (allJobs.length >= maxJobs) break;
+      }
+
+      if (allJobs.length >= maxJobs) break;
+
+      // 翻页间延迟
       if (pageNum < maxPages) {
-        await this.randomDelay(2000, 4000);
+        await this.randomDelay(1000, 2000);
       }
     }
 
-    return allJobs;
+    return allJobs.slice(0, maxJobs);
   }
 
+  /**
+   * 抓取单个职位详情
+   *
+   * 详情页 DOM 结构:
+   *   - `.job-recruit-title` → 标题
+   *   - `.job-recruit-location` → 地点
+   *   - `.recruit-tips` → 事业群 | 类别 | 经验 | 日期
+   *   - `.duty.work-module .duty-text` → 岗位职责
+   *   - `.requirement.work-module .duty-text` → 岗位要求
+   */
   protected async crawlJobDetail(
     page: Page,
     partialJob: Partial<JobPosting>
   ): Promise<JobPosting> {
     const detailUrl = partialJob.detailUrl || "";
-    await this.safeGoto(page, detailUrl);
-    await this.randomDelay(2000, 3000);
 
+    // 外部链接（如 Workday），直接使用 API 已有数据
+    if (!detailUrl.includes("careers.tencent.com/jobdesc")) {
+      console.log(`[腾讯] 外部链接，跳过详情抓取: ${detailUrl}`);
+      return {
+        id: `${this.source.id}_${partialJob.sourceId}`,
+        title: partialJob.title || "未知职位",
+        company: this.source.company,
+        source: this.source.id,
+        location: partialJob.location || "未知",
+        sourceId: partialJob.sourceId || "",
+        description: partialJob.description || "暂无描述",
+        requirements: "暂无要求（外部链接，请查看原始页面）",
+        detailUrl,
+        crawledAt: new Date().toISOString(),
+        category: partialJob.category,
+      };
+    }
+
+    await this.safeGoto(page, detailUrl);
+
+    // 等待详情页关键元素加载
     await page.waitForSelector(
-      '[class*="detail"], [class*="recruit-detail"], [class*="position"]',
+      ".duty.work-module, .requirement.work-module, .job-recruit-title",
       { timeout: 15000 }
     ).catch(() => {
-      console.log("[腾讯] 等待详情元素超时");
+      console.log("[腾讯] 等待详情元素超时，尝试继续...");
     });
 
+    await this.randomDelay(1500, 2500);
+
     const detail = await page.evaluate(() => {
-      const getText = (selectors: string[]): string => {
-        for (const sel of selectors) {
-          const el = document.querySelector(sel);
-          if (el?.textContent?.trim()) return el.textContent.trim();
-        }
-        return "";
-      };
+      // 标题
+      const titleEl = document.querySelector(".job-recruit-title");
+      const title = titleEl?.textContent?.trim() || "";
 
-      const title = getText([
-        'h1[class*="name"]',
-        '[class*="job-title"]',
-        '[class*="position-name"]',
-        "h1",
-      ]);
-
-      const location = getText([
-        '[class*="location"]',
-        '[class*="city"]',
-      ]);
-
-      // 获取描述和要求
-      const sections = document.querySelectorAll(
-        '[class*="detail-content"] > div, [class*="job-detail"] > div'
-      );
-      let description = "";
-      let requirements = "";
-
-      sections.forEach((section) => {
-        const text = section.textContent?.trim() || "";
-        if (text.includes("工作职责") || text.includes("职位描述")) {
-          description = text;
-        } else if (text.includes("工作要求") || text.includes("任职要求")) {
-          requirements = text;
-        }
-      });
-
-      if (!description && !requirements) {
-        const content = document.querySelector(
-          '[class*="detail-content"], [class*="job-detail"]'
-        );
-        description = content?.textContent?.trim() || "";
+      // 地点
+      const locationEl = document.querySelector(".job-recruit-location");
+      // 排除 icon-location 子元素的文本
+      let location = "";
+      if (locationEl) {
+        location = locationEl.textContent?.trim() || "";
       }
 
-      return { title, location, description, requirements };
+      // 事业群/子公司信息 (.recruit-tips)
+      const tipsEl = document.querySelector(".recruit-tips");
+      let department = "";
+      if (tipsEl) {
+        // 取第一个 span 的文本作为事业群/子公司
+        const firstSpan = tipsEl.querySelector("span");
+        department = firstSpan?.textContent?.trim() || "";
+      }
+
+      // 岗位职责 (.duty.work-module .duty-text)
+      const dutyEl = document.querySelector(".duty.work-module .duty-text");
+      const description = dutyEl?.textContent?.trim() || "";
+
+      // 岗位要求 (.requirement.work-module .duty-text)
+      const reqEl = document.querySelector(".requirement.work-module .duty-text");
+      const requirements = reqEl?.textContent?.trim() || "";
+
+      return { title, location, department, description, requirements };
     });
 
     return {
@@ -177,10 +303,11 @@ export class TencentCrawler extends BaseCrawler {
       source: this.source.id,
       location: detail.location || partialJob.location || "未知",
       sourceId: partialJob.sourceId || "",
-      description: detail.description || "暂无描述",
+      description: detail.description || partialJob.description || "暂无描述",
       requirements: detail.requirements || "暂无要求",
       detailUrl,
       crawledAt: new Date().toISOString(),
+      category: partialJob.category,
     };
   }
 }

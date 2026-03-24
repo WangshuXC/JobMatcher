@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# crawled job data
+/data
+
 # debug
 npm-debug.log*
 yarn-debug.log*

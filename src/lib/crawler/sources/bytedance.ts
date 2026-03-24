@@ -1,13 +1,114 @@
 /**
  * 字节跳动招聘爬虫
- * 目标: https://jobs.bytedance.com/experienced/position
  *
- * 页面为 SPA (React)，需要等待 JS 渲染完成后再提取数据。
- * 列表页通过 API 请求加载，详情页面使用动态渲染。
+ * 发现字节跳动招聘有完善的 JSON API，可直接调用无需签名：
+ *
+ * 列表 API (POST):
+ *   POST https://jobs.bytedance.com/api/v1/search/job/posts
+ *   Body: { keyword, limit, offset, job_category_id_list, portal_type, ... }
+ *   返回完整的结构化数据：标题、地点、类别、职责描述、职位要求等。
+ *   列表 API 已包含完整的 description + requirement，无需再访问详情页！
+ *
+ * 详情 API (GET, 备用):
+ *   GET https://jobs.bytedance.com/api/v1/job/posts/{postId}?portal_type=2&with_recommend=true
+ *
+ * 关键参数：
+ *   - job_category_id_list: ["6704215862603155720"] = 研发大类
+ *   - portal_type: 2 = 社招
+ *   - limit: 最大 50
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
-import { JobPosting, CrawlerSource } from "@/types";
+import { JobPosting, CrawlerSource, SourceMeta } from "@/types";
+
+/** 每页最大条数（API 最大支持 50） */
+const PAGE_SIZE = 50;
+
+/** 研发大类 category ID */
+const CATEGORY_RD = "6704215862603155720";
+
+/** API 基础地址 */
+const API_BASE = "https://jobs.bytedance.com/api/v1";
+
+/** 字节跳动列表 API 请求体 */
+interface BytedanceSearchBody {
+  keyword: string;
+  limit: number;
+  offset: number;
+  job_category_id_list: string[];
+  tag_id_list: string[];
+  location_code_list: string[];
+  subject_id_list: string[];
+  recruitment_id_list: string[];
+  portal_type: number;
+  job_function_id_list: string[];
+  storefront_id_list: string[];
+  portal_entrance: number;
+}
+
+/** 详情 API 返回结构 */
+interface BytedanceDetailResponse {
+  code: number;
+  data: {
+    job_post: BytedanceJobPost | null;
+  };
+  message: string;
+}
+
+/** API 返回的职位数据结构 */
+interface BytedanceJobPost {
+  id: string;
+  title: string;
+  sub_title: string | null;
+  description: string;
+  requirement: string;
+  job_category: {
+    id: string;
+    name: string;
+    en_name: string;
+    i18n_name: string;
+    depth: number;
+    parent: {
+      id: string;
+      name: string;
+      en_name: string;
+      i18n_name: string;
+    } | null;
+  };
+  city_info: {
+    code: string;
+    name: string;
+    en_name: string;
+    i18n_name: string;
+  };
+  city_list: Array<{
+    code: string;
+    name: string;
+    en_name: string;
+    i18n_name: string;
+  }> | null;
+  recruit_type: {
+    id: string;
+    name: string;
+    en_name: string;
+    i18n_name: string;
+    parent: {
+      name: string;
+      en_name: string;
+    } | null;
+  };
+  publish_time: number;
+  code: string;
+}
+
+interface BytedanceSearchResponse {
+  code: number;
+  data: {
+    job_post_list: BytedanceJobPost[];
+    count: number;
+  };
+  message: string;
+}
 
 export class BytedanceCrawler extends BaseCrawler {
   readonly source: CrawlerSource = {
@@ -20,277 +121,352 @@ export class BytedanceCrawler extends BaseCrawler {
     description: "字节跳动（今日头条、抖音母公司）社会招聘",
   };
 
-  /** 构建职位列表页 URL */
-  private buildListUrl(page: number, limit: number = 10, category?: string): string {
-    const params = new URLSearchParams({
-      keywords: "",
-      category: category || "6704215886108035339", // 默认: 研发
-      location: "",
-      project: "",
-      type: "",
-      job_hot_flag: "",
-      current: String(page),
-      limit: String(limit),
-      functionCategory: "",
-      tag: "",
-    });
-    return `${this.source.baseUrl}/experienced/position?${params.toString()}`;
+  /** 构建搜索请求体 */
+  private buildSearchBody(
+    offset: number,
+    limit: number = PAGE_SIZE,
+    keyword: string = "前端"
+  ): BytedanceSearchBody {
+    return {
+      keyword,
+      limit,
+      offset,
+      job_category_id_list: [CATEGORY_RD],
+      tag_id_list: [],
+      location_code_list: [],
+      subject_id_list: [],
+      recruitment_id_list: [],
+      portal_type: 2,
+      job_function_id_list: [],
+      storefront_id_list: [],
+      portal_entrance: 1,
+    };
   }
 
   /**
-   * 抓取职位列表
+   * 调用列表搜索 API
+   * 使用 Playwright page.evaluate 中的 fetch 来避免 CORS 问题
+   */
+  private async fetchSearchApi(
+    page: Page,
+    offset: number,
+    limit: number = PAGE_SIZE,
+    keyword: string = "前端"
+  ): Promise<BytedanceSearchResponse | null> {
+    const body = this.buildSearchBody(offset, limit, keyword);
+    const apiUrl = `${API_BASE}/search/job/posts`;
+
+    console.log(
+      `[字节跳动] 调用 API: offset=${offset}, limit=${limit}, keyword=${keyword}`
+    );
+
+    try {
+      const response = await page.evaluate(
+        async ({ url, body }: { url: string; body: BytedanceSearchBody }) => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          return res.json();
+        },
+        { url: apiUrl, body }
+      );
+
+      if (response?.code === 0 && response?.data) {
+        return response as BytedanceSearchResponse;
+      }
+
+      console.log(
+        "[字节跳动] API 返回异常:",
+        JSON.stringify(response).substring(0, 200)
+      );
+      return null;
+    } catch (err) {
+      console.log("[字节跳动] API 调用失败:", err);
+      return null;
+    }
+  }
+
+  /**
+   * 调用详情 API，获取单个职位的完整数据
+   * 用于列表 API 返回的数据不完整时的回退方案
+   */
+  private async fetchDetailApi(
+    page: Page,
+    postId: string
+  ): Promise<BytedanceJobPost | null> {
+    const apiUrl = `${API_BASE}/job/posts/${postId}?portal_type=2`;
+
+    console.log(`[字节跳动] 调用详情 API: postId=${postId}`);
+
+    try {
+      const response = await page.evaluate(
+        async (url: string) => {
+          const res = await fetch(url, {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          });
+          return res.json();
+        },
+        apiUrl
+      );
+
+      if (response?.code === 0 && response?.data?.job_post) {
+        return response.data.job_post as BytedanceJobPost;
+      }
+
+      console.log(
+        "[字节跳动] 详情 API 返回异常:",
+        JSON.stringify(response).substring(0, 200)
+      );
+      return null;
+    } catch (err) {
+      console.log("[字节跳动] 详情 API 调用失败:", err);
+      return null;
+    }
+  }
+
+  /**
+   * 判断列表 API 返回的职位数据是否完整
+   * description/requirement/location 任一缺失即视为不完整
+   */
+  private isJobDataIncomplete(partialJob: Partial<JobPosting>): boolean {
+    return (
+      !partialJob.description ||
+      !partialJob.requirements ||
+      partialJob.location === "未知"
+    );
+  }
+
+  /**
+   * 从详情 API 返回的 job_post 中提取补全信息
+   */
+  private parseDetailPost(post: BytedanceJobPost): {
+    description: string;
+    requirements: string;
+    location: string;
+    category: string;
+  } {
+    // 构建城市信息
+    const locations: string[] = [];
+    if (post.city_list && post.city_list.length > 0) {
+      for (const city of post.city_list) {
+        if (city.name) locations.push(city.name);
+      }
+    } else if (post.city_info?.name) {
+      locations.push(post.city_info.name);
+    }
+
+    // 构建分类信息
+    const categoryParts: string[] = [];
+    if (post.job_category?.parent?.name) {
+      categoryParts.push(post.job_category.parent.name);
+    }
+    if (post.job_category?.name) {
+      categoryParts.push(post.job_category.name);
+    }
+    if (post.recruit_type?.name) {
+      categoryParts.push(post.recruit_type.name);
+    }
+
+    return {
+      description: post.description || "",
+      requirements: post.requirement || "",
+      location: locations.join("、") || "未知",
+      category: categoryParts.join(" - ") || "",
+    };
+  }
+
+  /**
+   * 获取数据源元数据
+   */
+  async fetchMeta(): Promise<SourceMeta> {
+    try {
+      await this.launchBrowser();
+      const page = await this.newPage();
+
+      // 先访问首页建立 cookie/session
+      await this.safeGoto(page, this.source.baseUrl);
+      await this.randomDelay(1000, 2000);
+
+      const data = await this.fetchSearchApi(page, 0, 1);
+
+      await page.close();
+      await this.closeBrowser();
+
+      if (data) {
+        const totalJobs = data.data.count;
+        return {
+          sourceId: this.source.id,
+          totalJobs,
+          pageSize: PAGE_SIZE,
+          totalPages: Math.ceil(totalJobs / PAGE_SIZE),
+          success: true,
+        };
+      }
+
+      return {
+        sourceId: this.source.id,
+        totalJobs: 0,
+        pageSize: PAGE_SIZE,
+        totalPages: 0,
+        success: false,
+        error: "API 返回空数据",
+      };
+    } catch (err) {
+      await this.closeBrowser();
+      return {
+        sourceId: this.source.id,
+        totalJobs: 0,
+        pageSize: PAGE_SIZE,
+        totalPages: 0,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * 通过 API 抓取职位列表
+   *
+   * 因为列表 API 已返回完整的 description + requirement，
+   * 这里直接组装完整的 JobPosting（带一个特殊标记），
+   * 让 crawlJobDetail 直接返回已有数据，跳过详情页抓取。
    */
   protected async crawlJobList(
     page: Page,
-    maxPages: number
+    maxJobs: number
   ): Promise<Partial<JobPosting>[]> {
     const allJobs: Partial<JobPosting>[] = [];
 
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      const url = this.buildListUrl(pageNum);
-      console.log(`[字节跳动] 抓取第 ${pageNum} 页: ${url}`);
+    // 先访问首页建立 cookie/session
+    await this.safeGoto(page, this.source.baseUrl);
+    await this.randomDelay(1000, 2000);
 
-      await this.safeGoto(page, url);
+    // 分页获取
+    for (let offset = 0; offset < maxJobs; offset += PAGE_SIZE) {
+      const limit = Math.min(PAGE_SIZE, maxJobs - offset);
+      const data = await this.fetchSearchApi(page, offset, limit);
 
-      // 等待职位列表渲染出来
-      await page.waitForSelector(
-        '[class*="positionItem"], [class*="job-card"], [class*="position-card"], a[href*="/position/"]',
-        { timeout: 15000 }
-      ).catch(() => {
-        console.log("[字节跳动] 等待列表元素超时，尝试继续...");
-      });
+      if (!data || !data.data.job_post_list || data.data.job_post_list.length === 0) {
+        console.log(`[字节跳动] offset=${offset} 无数据，停止翻页`);
+        break;
+      }
 
-      // 额外等待确保页面完全渲染
-      await this.randomDelay(2000, 3000);
+      const pageIndex = Math.floor(offset / PAGE_SIZE) + 1;
+      const totalPages = Math.ceil(maxJobs / PAGE_SIZE);
+      console.log(
+        `[字节跳动] 第 ${pageIndex}/${totalPages} 页获取到 ${data.data.job_post_list.length} 个职位`
+      );
 
-      // 提取职位列表项
-      const jobItems = await page.evaluate(() => {
-        const items: Array<{
-          title: string;
-          detailUrl: string;
-          sourceId: string;
-          location: string;
-        }> = [];
+      for (const post of data.data.job_post_list) {
+        // 构建城市信息：优先使用 city_list（多城市），否则用 city_info
+        const locations: string[] = [];
+        if (post.city_list && post.city_list.length > 0) {
+          for (const city of post.city_list) {
+            if (city.name) locations.push(city.name);
+          }
+        } else if (post.city_info?.name) {
+          locations.push(post.city_info.name);
+        }
+        const location = locations.join("、") || "未知";
 
-        // 查找所有职位链接
-        const links = document.querySelectorAll('a[href*="/position/"]');
-        const seen = new Set<string>();
+        // 构建分类信息：子类别 + 父类别
+        const categoryParts: string[] = [];
+        if (post.job_category?.parent?.name) {
+          categoryParts.push(post.job_category.parent.name);
+        }
+        if (post.job_category?.name) {
+          categoryParts.push(post.job_category.name);
+        }
+        if (post.recruit_type?.name) {
+          categoryParts.push(post.recruit_type.name);
+        }
+        const category = categoryParts.join(" - ") || "";
 
-        links.forEach((link) => {
-          const href = (link as HTMLAnchorElement).href;
-          // 提取职位ID
-          const match = href.match(/\/position\/(\d+)/);
-          if (!match) return;
+        const detailUrl = `${this.source.baseUrl}/experienced/position/${post.id}/detail`;
 
-          const sourceId = match[1];
-          if (seen.has(sourceId)) return;
-          seen.add(sourceId);
-
-          // 从链接容器中提取信息
-          const container = link.closest('[class*="item"], [class*="card"], li') || link;
-          const titleEl =
-            container.querySelector('[class*="title"], [class*="name"], h3, h4') ||
-            link;
-          const locationEl = container.querySelector(
-            '[class*="location"], [class*="city"], [class*="address"]'
-          );
-
-          items.push({
-            title: titleEl?.textContent?.trim() || "未知职位",
-            detailUrl: href.startsWith("http")
-              ? href
-              : `${window.location.origin}${href}`,
-            sourceId,
-            location: locationEl?.textContent?.trim() || "",
-          });
-        });
-
-        return items;
-      });
-
-      console.log(`[字节跳动] 第 ${pageNum} 页发现 ${jobItems.length} 个职位`);
-
-      for (const item of jobItems) {
         allJobs.push({
-          title: item.title,
+          id: `${this.source.id}_${post.id}`,
+          title: post.title,
           source: this.source.id,
           company: this.source.company,
-          sourceId: item.sourceId,
-          detailUrl: item.detailUrl,
-          location: item.location,
+          sourceId: post.id,
+          detailUrl,
+          location,
+          description: post.description || "",
+          requirements: post.requirement || "",
+          category,
+          crawledAt: new Date().toISOString(),
         });
+
+        if (allJobs.length >= maxJobs) break;
       }
 
-      // 如果当前页没有数据，说明没有更多页了
-      if (jobItems.length === 0) break;
+      if (allJobs.length >= maxJobs) break;
 
-      if (pageNum < maxPages) {
-        await this.randomDelay(2000, 4000);
-      }
+      // 翻页间延迟
+      await this.randomDelay(500, 1500);
     }
 
-    return allJobs;
+    return allJobs.slice(0, maxJobs);
   }
 
   /**
    * 抓取单个职位详情
+   *
+   * 优先使用列表 API 已返回的数据。
+   * 当关键字段（description、requirement、location）缺失时，
+   * 回退到详情 API 获取完整数据。
    */
   protected async crawlJobDetail(
     page: Page,
     partialJob: Partial<JobPosting>
   ): Promise<JobPosting> {
-    const detailUrl = partialJob.detailUrl || "";
-
-    // 确保 URL 包含 /detail
-    const fullUrl = detailUrl.includes("/detail")
-      ? detailUrl
-      : `${detailUrl}/detail`;
-
-    await this.safeGoto(page, fullUrl);
-
-    // 等待详情内容加载
-    await page.waitForSelector(
-      '[class*="detail"], [class*="content"], [class*="job-"], article',
-      { timeout: 15000 }
-    ).catch(() => {
-      console.log("[字节跳动] 等待详情元素超时，尝试继续...");
-    });
-
-    await this.randomDelay(1500, 2500);
-
-    // 提取详情信息
-    const detail = await page.evaluate(() => {
-      // 辅助函数：尝试多个选择器
-      const getText = (selectors: string[]): string => {
-        for (const sel of selectors) {
-          const el = document.querySelector(sel);
-          if (el?.textContent?.trim()) {
-            return el.textContent.trim();
-          }
-        }
-        return "";
-      };
-
-      // 提取所有文本块
-      const getAllText = (): string => {
-        const blocks: string[] = [];
-        document.querySelectorAll("p, li, div > span, h1, h2, h3, h4").forEach((el) => {
-          const text = el.textContent?.trim();
-          if (text && text.length > 5) {
-            blocks.push(text);
-          }
-        });
-        return blocks.join("\n");
-      };
-
-      // 职位名称
-      const title = getText([
-        'h1[class*="title"]',
-        'h1[class*="name"]',
-        '[class*="job-title"]',
-        '[class*="position-name"]',
-        "h1",
-        'h2[class*="title"]',
-      ]);
-
-      // 工作地点
-      const location = getText([
-        '[class*="location"]',
-        '[class*="city"]',
-        '[class*="address"]',
-        '[class*="place"]',
-      ]);
-
-      // 职位ID - 从URL中提取
-      const urlMatch = window.location.pathname.match(/\/position\/(\d+)/);
-      const sourceId = urlMatch ? urlMatch[1] : "";
-
-      // 职位描述和要求 - 通常在主体内容区域
-      const fullText = getAllText();
-
-      // 尝试分离描述和要求
-      let description = "";
-      let requirements = "";
-
-      // 查找包含 "职位描述" / "工作职责" / "职位要求" / "任职要求" 等关键词的区块
-      const sections = document.querySelectorAll(
-        '[class*="content"] > div, [class*="detail"] > div, [class*="section"], [class*="block"]'
+    // 如果列表数据不完整，尝试通过详情 API 补全
+    if (this.isJobDataIncomplete(partialJob) && partialJob.sourceId) {
+      console.log(
+        `[字节跳动] 职位 "${partialJob.title}" 数据不完整（location=${partialJob.location}），尝试详情 API 补全...`
       );
 
-      sections.forEach((section) => {
-        const text = section.textContent?.trim() || "";
-        const heading = section.querySelector("h2, h3, h4, [class*='title']")?.textContent?.trim() || "";
+      const detailPost = await this.fetchDetailApi(page, partialJob.sourceId);
 
-        if (
-          heading.includes("职位描述") ||
-          heading.includes("工作职责") ||
-          heading.includes("工作内容") ||
-          text.startsWith("职位描述") ||
-          text.startsWith("工作职责")
-        ) {
-          description = text;
-        } else if (
-          heading.includes("职位要求") ||
-          heading.includes("任职要求") ||
-          heading.includes("岗位要求") ||
-          text.startsWith("职位要求") ||
-          text.startsWith("任职要求")
-        ) {
-          requirements = text;
-        }
-      });
-
-      // 如果未能通过结构分离，尝试通过关键词分割
-      if (!description && !requirements && fullText) {
-        const descKeywords = ["职位描述", "工作职责", "工作内容"];
-        const reqKeywords = ["职位要求", "任职要求", "岗位要求"];
-
-        let descIdx = -1;
-        let reqIdx = -1;
-
-        for (const kw of descKeywords) {
-          const idx = fullText.indexOf(kw);
-          if (idx !== -1) {
-            descIdx = idx;
-            break;
-          }
-        }
-        for (const kw of reqKeywords) {
-          const idx = fullText.indexOf(kw);
-          if (idx !== -1) {
-            reqIdx = idx;
-            break;
-          }
-        }
-
-        if (descIdx !== -1 && reqIdx !== -1) {
-          if (descIdx < reqIdx) {
-            description = fullText.slice(descIdx, reqIdx).trim();
-            requirements = fullText.slice(reqIdx).trim();
-          } else {
-            requirements = fullText.slice(reqIdx, descIdx).trim();
-            description = fullText.slice(descIdx).trim();
-          }
-        } else {
-          // 无法分离，整体作为描述
-          description = fullText;
-        }
+      if (detailPost) {
+        const detail = this.parseDetailPost(detailPost);
+        return {
+          id: partialJob.id || `${this.source.id}_${partialJob.sourceId}`,
+          title: detailPost.title || partialJob.title || "未知职位",
+          company: this.source.company,
+          source: this.source.id,
+          location: detail.location !== "未知" ? detail.location : (partialJob.location || "未知"),
+          sourceId: partialJob.sourceId || "",
+          description: detail.description || partialJob.description || "暂无描述",
+          requirements: detail.requirements || partialJob.requirements || "暂无要求",
+          detailUrl: partialJob.detailUrl || "",
+          crawledAt: partialJob.crawledAt || new Date().toISOString(),
+          category: detail.category || partialJob.category,
+        };
       }
 
-      return { title, location, sourceId, description, requirements };
-    });
+      console.log(
+        `[字节跳动] 详情 API 未返回有效数据，使用列表数据`
+      );
+    }
 
+    // 列表 API 已提供完整数据，直接返回
     return {
-      id: `${this.source.id}_${detail.sourceId || partialJob.sourceId}`,
-      title: detail.title || partialJob.title || "未知职位",
+      id: partialJob.id || `${this.source.id}_${partialJob.sourceId}`,
+      title: partialJob.title || "未知职位",
       company: this.source.company,
       source: this.source.id,
-      location: detail.location || partialJob.location || "未知",
-      sourceId: detail.sourceId || partialJob.sourceId || "",
-      description: detail.description || "暂无描述",
-      requirements: detail.requirements || "暂无要求",
-      detailUrl: fullUrl,
-      crawledAt: new Date().toISOString(),
+      location: partialJob.location || "未知",
+      sourceId: partialJob.sourceId || "",
+      description: partialJob.description || "暂无描述",
+      requirements: partialJob.requirements || "暂无要求",
+      detailUrl: partialJob.detailUrl || "",
+      crawledAt: partialJob.crawledAt || new Date().toISOString(),
+      category: partialJob.category,
     };
   }
 }

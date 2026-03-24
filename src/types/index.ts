@@ -46,6 +46,22 @@ export interface CrawlerSource {
   description: string;
 }
 
+/** 数据源元数据（总数/分页信息） */
+export interface SourceMeta {
+  /** 数据源 ID */
+  sourceId: string;
+  /** 可抓取的职位总数 */
+  totalJobs: number;
+  /** 每页职位数 */
+  pageSize: number;
+  /** 总页数 */
+  totalPages: number;
+  /** 是否成功获取 */
+  success: boolean;
+  /** 错误信息 */
+  error?: string;
+}
+
 /** 爬虫执行状态 */
 export type CrawlerStatus = "idle" | "running" | "completed" | "error";
 
@@ -115,7 +131,8 @@ export interface MatchBreakdown {
 export interface CrawlRequest {
   sources: string[];
   keywords?: string;
-  maxPages?: number;
+  /** 期望抓取的岗位数量 */
+  maxJobs?: number;
 }
 
 /** 匹配请求参数 */

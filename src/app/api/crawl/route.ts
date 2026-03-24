@@ -1,20 +1,20 @@
 /**
  * POST /api/crawl - 执行爬虫抓取
  *
- * Body: { sources: string[], maxPages?: number }
+ * Body: { sources: string[], maxJobs?: number }
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getCrawler } from "@/lib/crawler/registry";
 import { jobStore } from "@/lib/store";
 import { CrawlResult } from "@/types";
 
-export const maxDuration = 120; // 最大执行时间 120 秒
+export const maxDuration = 300; // 最大执行时间 300 秒（并行抓取详情速度更快，但总体时间可能更长）
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sources, maxPages = 1 } = body as {
+  const { sources, maxJobs = 10 } = body as {
     sources: string[];
-    maxPages?: number;
+    maxJobs?: number;
   };
 
   if (!sources || sources.length === 0) {
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    const result = await crawler.crawl(maxPages);
+    const result = await crawler.crawl(maxJobs);
     results.push(result);
 
     // 存储抓取结果

@@ -6,7 +6,9 @@
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
-import { JobPosting, CrawlerSource } from "@/types";
+import { JobPosting, CrawlerSource, SourceMeta } from "@/types";
+
+const PAGE_SIZE = 20;
 
 export class AlibabaCrawler extends BaseCrawler {
   readonly source: CrawlerSource = {
@@ -23,15 +25,114 @@ export class AlibabaCrawler extends BaseCrawler {
     return `${this.source.baseUrl}/off-campus/position-list?lang=zh&type=experienced&page=${page}`;
   }
 
+  /**
+   * 获取数据源元数据
+   */
+  async fetchMeta(): Promise<SourceMeta> {
+    try {
+      await this.launchBrowser();
+      const page = await this.newPage();
+
+      const url = this.buildListUrl(1);
+      console.log(`[阿里巴巴] 获取元数据: ${url}`);
+
+      await this.safeGoto(page, url);
+      await this.randomDelay(3000, 5000);
+
+      await page.waitForSelector(
+        '[class*="position"], [class*="job-list"], [class*="card"], a[href*="position"]',
+        { timeout: 15000 }
+      ).catch(() => {
+        console.log("[阿里巴巴] 等待列表元素超时");
+      });
+
+      const meta = await page.evaluate((pageSize: number) => {
+        let totalJobs = 0;
+        let totalPages = 0;
+
+        // 尝试从分页组件获取
+        const paginationEls = document.querySelectorAll(
+          '[class*="pagination"] li, [class*="pager"] li, [class*="page"] a, [class*="page"] button'
+        );
+        if (paginationEls.length > 0) {
+          let maxPage = 1;
+          paginationEls.forEach((el) => {
+            const text = el.textContent?.trim() || "";
+            const num = parseInt(text, 10);
+            if (!isNaN(num) && num > maxPage) {
+              maxPage = num;
+            }
+          });
+          totalPages = maxPage;
+          totalJobs = maxPage * pageSize;
+        }
+
+        // 尝试从文字中获取
+        if (totalJobs === 0) {
+          const allText = document.body.innerText;
+          const totalMatch = allText.match(/共\s*(\d+)\s*个|共\s*(\d+)\s*条|共(\d+)个|总计\s*(\d+)|找到\s*(\d+)\s*个|(\d+)\s*个职位/);
+          if (totalMatch) {
+            const num = parseInt(totalMatch[1] || totalMatch[2] || totalMatch[3] || totalMatch[4] || totalMatch[5] || totalMatch[6], 10);
+            if (!isNaN(num) && num > 0) {
+              totalJobs = num;
+              totalPages = Math.ceil(num / pageSize);
+            }
+          }
+        }
+
+        // 兜底
+        if (totalJobs === 0) {
+          const cards = document.querySelectorAll(
+            '[class*="position-item"], [class*="job-card"], a[href*="position-detail"]'
+          );
+          const seen = new Set<string>();
+          cards.forEach((card) => {
+            const link = card.tagName === "A" ? (card as HTMLAnchorElement) : card.querySelector("a");
+            if (!link) return;
+            const href = link.href;
+            const match = href.match(/position[/-]detail[/=]?(\w+)/i) || href.match(/positionId=(\w+)/i);
+            if (match) seen.add(match[1]);
+          });
+          totalJobs = seen.size >= pageSize ? seen.size * 10 : seen.size;
+          totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
+        }
+
+        return { totalJobs, totalPages };
+      }, PAGE_SIZE);
+
+      await page.close();
+      await this.closeBrowser();
+
+      return {
+        sourceId: this.source.id,
+        totalJobs: meta.totalJobs,
+        pageSize: PAGE_SIZE,
+        totalPages: meta.totalPages,
+        success: true,
+      };
+    } catch (err) {
+      await this.closeBrowser();
+      return {
+        sourceId: this.source.id,
+        totalJobs: 0,
+        pageSize: PAGE_SIZE,
+        totalPages: 0,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   protected async crawlJobList(
     page: Page,
-    maxPages: number
+    maxJobs: number
   ): Promise<Partial<JobPosting>[]> {
     const allJobs: Partial<JobPosting>[] = [];
+    const maxPages = Math.ceil(maxJobs / PAGE_SIZE);
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       const url = this.buildListUrl(pageNum);
-      console.log(`[阿里巴巴] 抓取第 ${pageNum} 页: ${url}`);
+      console.log(`[阿里巴巴] 抓取第 ${pageNum}/${maxPages} 页: ${url}`);
 
       await this.safeGoto(page, url);
       await this.randomDelay(3000, 5000);
@@ -96,16 +197,18 @@ export class AlibabaCrawler extends BaseCrawler {
           detailUrl: item.detailUrl,
           location: item.location,
         });
+
+        if (allJobs.length >= maxJobs) break;
       }
 
-      if (jobItems.length === 0) break;
+      if (allJobs.length >= maxJobs || jobItems.length === 0) break;
 
       if (pageNum < maxPages) {
         await this.randomDelay(2000, 4000);
       }
     }
 
-    return allJobs;
+    return allJobs.slice(0, maxJobs);
   }
 
   protected async crawlJobDetail(

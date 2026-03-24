@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion } from "motion/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bot, Briefcase, Brain, Sparkles } from "lucide-react";
@@ -10,10 +10,23 @@ import ResumeMatch from "@/components/ResumeMatch";
 
 export default function HomePage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [activeTab, setActiveTab] = useState("crawler");
 
-  const handleCrawlComplete = () => {
+  const handleCrawlComplete = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1);
-  };
+  }, []);
+
+  const handleTabChange = useCallback(
+    (value: string | number | null) => {
+      const tab = String(value ?? "crawler");
+      setActiveTab(tab);
+      // 切换到"职位列表"时强制刷新
+      if (tab === "jobs") {
+        setRefreshTrigger((prev) => prev + 1);
+      }
+    },
+    []
+  );
 
   return (
     <main className="flex-1">
@@ -42,7 +55,7 @@ export default function HomePage() {
 
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        <Tabs defaultValue="crawler" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList className="grid w-full grid-cols-3 h-12">
             <TabsTrigger
               value="crawler"
