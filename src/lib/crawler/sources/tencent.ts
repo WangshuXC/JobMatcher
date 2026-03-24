@@ -17,7 +17,7 @@
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
-import { JobPosting, CrawlerSource, SourceMeta } from "@/types";
+import { JobPosting, CrawlerSource } from "@/types";
 
 const PAGE_SIZE = 10;
 
@@ -103,55 +103,6 @@ export class TencentCrawler extends BaseCrawler {
     } catch (err) {
       console.log("[腾讯] API 调用失败:", err);
       return null;
-    }
-  }
-
-  /**
-   * 获取数据源元数据
-   */
-  async fetchMeta(): Promise<SourceMeta> {
-    try {
-      await this.launchBrowser();
-      const page = await this.newPage();
-
-      // 先访问首页建立 cookie/session
-      await this.safeGoto(page, this.source.baseUrl);
-      await this.randomDelay(1000, 2000);
-
-      const data = await this.fetchApiData(page, 1);
-
-      await page.close();
-      await this.closeBrowser();
-
-      if (data) {
-        const totalJobs = data.Data.Count;
-        return {
-          sourceId: this.source.id,
-          totalJobs,
-          pageSize: PAGE_SIZE,
-          totalPages: Math.ceil(totalJobs / PAGE_SIZE),
-          success: true,
-        };
-      }
-
-      return {
-        sourceId: this.source.id,
-        totalJobs: 0,
-        pageSize: PAGE_SIZE,
-        totalPages: 0,
-        success: false,
-        error: "API 返回空数据",
-      };
-    } catch (err) {
-      await this.closeBrowser();
-      return {
-        sourceId: this.source.id,
-        totalJobs: 0,
-        pageSize: PAGE_SIZE,
-        totalPages: 0,
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
     }
   }
 

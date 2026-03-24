@@ -16,6 +16,11 @@ export default function HomePage() {
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
+  /** 爬虫运行时每批新职位到达都触发 JobList 刷新 */
+  const handleJobsUpdate = useCallback(() => {
+    setRefreshTrigger((prev) => prev + 1);
+  }, []);
+
   const handleTabChange = useCallback(
     (value: string | number | null) => {
       const tab = String(value ?? "crawler");
@@ -89,7 +94,7 @@ export default function HomePage() {
             transition={{ delay: 0.2 }}
           >
             <TabsContent value="crawler">
-              <CrawlerPanel onCrawlComplete={handleCrawlComplete} />
+              <CrawlerPanel onCrawlComplete={handleCrawlComplete} onJobsUpdate={handleJobsUpdate} />
             </TabsContent>
 
             <TabsContent value="jobs">

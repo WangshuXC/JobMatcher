@@ -188,8 +188,9 @@ export default function JobList({ refreshTrigger }: JobListProps) {
             </Button>
           </div>
 
-          {/* 数据源标签筛选 */}
+          {/* 数据源标签筛选 + 地点筛选 */}
           <div className="flex gap-2 flex-wrap items-center">
+            {/* 公司选择 — 左侧 */}
             <Button
               size="sm"
               variant={selectedSource === null ? "default" : "outline"}
@@ -217,7 +218,7 @@ export default function JobList({ refreshTrigger }: JobListProps) {
               </Button>
             ))}
 
-            {/* 地点筛选 */}
+            {/* 地点筛选 — 右侧 */}
             {locations.length > 0 && (
               <Select
                 value={selectedLocation}
@@ -227,7 +228,7 @@ export default function JobList({ refreshTrigger }: JobListProps) {
                   fetchJobs(selectedSource, keyword, loc);
                 }}
               >
-                <SelectTrigger className="h-8 min-w-[120px] cursor-pointer">
+                <SelectTrigger className="h-8 min-w-30 ml-auto cursor-pointer">
                   <MapPin className="h-3.5 w-3.5 text-muted-foreground mr-1" />
                   <SelectValue>
                     {selectedLocation === "__all__"
@@ -255,7 +256,7 @@ export default function JobList({ refreshTrigger }: JobListProps) {
               <p className="text-sm mt-2">请先运行爬虫 Agent 抓取招聘信息</p>
             </div>
           ) : (
-            <ScrollArea className="h-[500px]" ref={scrollRef}>
+            <ScrollArea className="h-125" ref={scrollRef}>
               <div key={listKey} className="space-y-3 pr-4">
                 {filteredJobs.map((job, index) => (
                   <motion.div

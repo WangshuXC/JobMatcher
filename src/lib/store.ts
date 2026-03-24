@@ -123,14 +123,17 @@ class JobStore {
     this.saveToFile();
   }
 
-  /** 获取所有去重的地点列表（按数量降序） */
+  /** 获取所有去重的地点列表（按数量降序，自动拆分复合地点） */
   getLocations(): string[] {
     this.loadFromFile();
     const counts: Record<string, number> = {};
     for (const job of this.jobs.values()) {
-      const loc = (job.location || "").trim();
-      if (loc) {
-        counts[loc] = (counts[loc] || 0) + 1;
+      const parts = (job.location || "")
+        .split(/[、，,/／]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const part of parts) {
+        counts[part] = (counts[part] || 0) + 1;
       }
     }
     return Object.entries(counts)

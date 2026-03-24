@@ -3,11 +3,11 @@
  *
  * 新增数据源只需：
  * 1. 在 sources/ 下新建文件继承 BaseCrawler
- * 2. 实现 fetchMeta、crawlJobList 和 crawlJobDetail 方法
+ * 2. 实现 crawlJobList 和 crawlJobDetail 方法
  * 3. 在 registry.ts 中注册
  */
 import { chromium, Browser, Page, BrowserContext } from "playwright";
-import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus, SourceMeta } from "@/types";
+import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus } from "@/types";
 
 /** 并行抓取的默认并发数 */
 const DEFAULT_CONCURRENCY = 5;
@@ -15,6 +15,12 @@ const DEFAULT_CONCURRENCY = 5;
 export abstract class BaseCrawler {
   protected browser: Browser | null = null;
   protected context: BrowserContext | null = null;
+
+  /**
+   * 可选的批次回调 — 每当一批职位抓取完成时调用
+   * 用于实时增量存储和推送到前端
+   */
+  onJobsBatch?: (jobs: JobPosting[]) => void;
 
   /** 数据源配置信息 */
   abstract readonly source: CrawlerSource;
@@ -63,12 +69,6 @@ export abstract class BaseCrawler {
     const delay = Math.floor(Math.random() * (max - min + 1)) + min;
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
-
-  /**
-   * 获取数据源元数据（总页数、每页条数、总职位数）
-   * 子类必须实现，通过访问招聘列表页第一页获取分页信息
-   */
-  abstract fetchMeta(): Promise<SourceMeta>;
 
   /**
    * 抓取职位列表 - 返回基本信息和详情页URL列表
@@ -133,10 +133,17 @@ export abstract class BaseCrawler {
 
       const results = await Promise.all(promises);
 
+      const batchJobs: JobPosting[] = [];
       for (const job of results) {
         if (job) {
           jobs.push(job);
+          batchJobs.push(job);
         }
+      }
+
+      // 每批完成后调用回调，实现增量推送
+      if (batchJobs.length > 0 && this.onJobsBatch) {
+        this.onJobsBatch(batchJobs);
       }
 
       // 批次间随机延迟防反爬
@@ -150,23 +157,25 @@ export abstract class BaseCrawler {
 
   /**
    * 执行完整的爬取流程
-   * @param maxJobs - 最大抓取岗位数量（默认 10）
+   * @param maxJobs - 最大抓取岗位数量（0 或不传表示全部抓取）
    * @param concurrency - 详情并行抓取并发数
    */
-  async crawl(maxJobs: number = 10, concurrency: number = DEFAULT_CONCURRENCY): Promise<CrawlResult> {
+  async crawl(maxJobs: number = 0, concurrency: number = DEFAULT_CONCURRENCY): Promise<CrawlResult> {
     const startTime = Date.now();
     let status: CrawlerStatus = "running";
     let jobs: JobPosting[] = [];
+    // maxJobs <= 0 表示不限制，用 Infinity 方便比较
+    const effectiveMax = maxJobs > 0 ? maxJobs : Infinity;
 
-    console.log(`[${this.source.name}] 开始爬取，目标 ${maxJobs} 个岗位...`);
+    console.log(`[${this.source.name}] 开始爬取，目标 ${maxJobs > 0 ? maxJobs + ' 个岗位' : '全部岗位'}...`);
 
     try {
       await this.launchBrowser();
       const page = await this.newPage();
 
-      // 第一步：获取职位列表（根据 maxJobs 自动计算需要的页数）
+      // 第一步：获取职位列表（根据 effectiveMax 自动计算需要的页数）
       console.log(`[${this.source.name}] 正在抓取职位列表...`);
-      const partialJobs = await this.crawlJobList(page, maxJobs);
+      const partialJobs = await this.crawlJobList(page, effectiveMax);
       console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
 
       // 关闭列表页
