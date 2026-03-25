@@ -1,13 +1,24 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { motion } from "motion/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Card,
+  CardHeader,
+  CardContent,
+  ModalBackdrop,
+  ModalContainer,
+  ModalDialog,
+  ModalHeader as HModalHeader,
+  ModalHeading,
+  ModalBody,
+  ModalFooter,
+  ModalCloseTrigger,
+  useOverlayState,
+} from "@heroui/react";
 import {
   Select,
   SelectContent,
@@ -16,14 +27,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Briefcase,
   MapPin,
   Search,
@@ -31,7 +34,9 @@ import {
   Hash,
   Building2,
   Trash2,
+  Loader2,
 } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { JobPosting } from "@/types";
 
 interface JobListProps {
@@ -59,28 +64,17 @@ export default function JobList({ refreshTrigger }: JobListProps) {
   const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
   const [countBySource, setCountBySource] = useState<Record<string, number>>({});
   const [locations, setLocations] = useState<string[]>([]);
-  // 用于筛选/搜索切换时跳过入场动画 + 滚回顶部
-  const [listKey, setListKey] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const detailModal = useOverlayState();
+  const clearModal = useOverlayState();
 
   // 用 ref 保存当前筛选条件，以便 refreshTrigger 触发时能读取最新值
   const filtersRef = useRef({ source: null as string | null, keyword: "", location: "__all__" });
   useEffect(() => {
     filtersRef.current = { source: selectedSource, keyword, location: selectedLocation };
   }, [selectedSource, keyword, selectedLocation]);
-
-  /** 重置滚动位置到顶部 */
-  const scrollToTop = useCallback(() => {
-    // ScrollArea 的 viewport 是内部的 [data-slot="scroll-area-viewport"] div
-    const viewport = scrollRef.current?.querySelector(
-      "[data-radix-scroll-area-viewport], [data-slot='scroll-area-viewport']"
-    );
-    if (viewport) {
-      viewport.scrollTop = 0;
-    }
-  }, []);
 
   /** 通用请求函数：根据筛选条件拉取职位数据 */
   const fetchJobs = useCallback(async (source: string | null, kw: string, location: string | null) => {
@@ -96,30 +90,32 @@ export default function JobList({ refreshTrigger }: JobListProps) {
       setFilteredJobs(data.data.jobs);
       setCountBySource(data.data.countBySource);
       setLocations(data.data.locations || []);
-      // 筛选后重置列表 key（跳过动画）并滚回顶部
-      setListKey((k) => k + 1);
-      scrollToTop();
     }
-  }, [scrollToTop]);
+  }, []);
 
   // 组件挂载和 refreshTrigger 变化时拉取数据（保留当前筛选条件）
   useEffect(() => {
     let cancelled = false;
 
     const loadJobs = async () => {
+      setInitialLoading(true);
       const { source, keyword: kw, location } = filtersRef.current;
       const params = new URLSearchParams();
       if (source) params.set("source", source);
       if (kw) params.set("keyword", kw);
       if (location && location !== "__all__") params.set("location", location);
 
-      const response = await fetch(`/api/jobs?${params.toString()}`);
-      const data = await response.json();
-      if (!cancelled && data.success) {
-        setJobs(data.data.jobs);
-        setFilteredJobs(data.data.jobs);
-        setCountBySource(data.data.countBySource);
-        setLocations(data.data.locations || []);
+      try {
+        const response = await fetch(`/api/jobs?${params.toString()}`);
+        const data = await response.json();
+        if (!cancelled && data.success) {
+          setJobs(data.data.jobs);
+          setFilteredJobs(data.data.jobs);
+          setCountBySource(data.data.countBySource);
+          setLocations(data.data.locations || []);
+        }
+      } finally {
+        if (!cancelled) setInitialLoading(false);
       }
     };
 
@@ -147,37 +143,34 @@ export default function JobList({ refreshTrigger }: JobListProps) {
         setSelectedSource(null);
         setSelectedLocation("__all__");
         setKeyword("");
-        setListKey((k) => k + 1);
       }
     } finally {
       setClearing(false);
-      setShowClearConfirm(false);
+      clearModal.close();
     }
   };
 
   return (
     <>
       <Card className="border-border/50 shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xl">
-              <Briefcase className="h-6 w-6 text-primary" />
-              职位列表
-            </div>
-            <div className="flex items-center gap-2">
-              {jobs.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowClearConfirm(true)}
-                  className="cursor-pointer text-destructive hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-3.5 w-3.5 mr-1" />
-                  清除数据
-                </Button>
-              )}
-            </div>
-          </CardTitle>
+        <CardHeader className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xl font-semibold">
+            <Briefcase className="h-6 w-6 text-primary" />
+            职位列表
+          </div>
+          <div className="flex items-center gap-2">
+            {jobs.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearModal.open}
+                className="cursor-pointer text-destructive hover:text-destructive hover:bg-destructive/10 my-2"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                清除数据
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* 搜索和筛选 */}
@@ -259,170 +252,241 @@ export default function JobList({ refreshTrigger }: JobListProps) {
           </div>
 
           {/* 职位列表 */}
-          {filteredJobs.length === 0 ? (
+          {initialLoading ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <Loader2 className="h-10 w-10 mx-auto mb-4 animate-spin text-primary/50" />
+              <p className="text-sm">加载职位数据中...</p>
+            </div>
+          ) : filteredJobs.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
               <Briefcase className="h-12 w-12 mx-auto mb-4 opacity-30" />
               <p className="text-lg">暂无职位数据</p>
               <p className="text-sm mt-2">请先运行爬虫 Agent 抓取招聘信息</p>
             </div>
           ) : (
-            <ScrollArea className="h-125" ref={scrollRef}>
-              <div key={listKey} className="space-y-3 pr-4">
-                {filteredJobs.map((job, index) => (
-                  <motion.div
-                    key={job.id}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{
-                      duration: 0.2,
-                      delay: Math.min(index * 0.02, 0.3),
-                    }}
-                  >
-                      <button
-                        type="button"
-                        className="w-full text-left p-4 rounded-xl border border-border/50 hover:border-primary/50 hover:shadow-md transition-all cursor-pointer bg-card"
-                        onClick={() => setSelectedJob(job)}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-base truncate">
-                              {job.title}
-                            </h3>
-                            <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <Building2 className="h-3.5 w-3.5" />
-                                {job.company}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <MapPin className="h-3.5 w-3.5" />
-                                {job.location || "未知"}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Hash className="h-3.5 w-3.5" />
-                                {job.sourceId}
-                              </span>
-                            </div>
-                          </div>
-                          <Badge
-                            className={`shrink-0 ${
-                              SOURCE_COLORS[job.source] || ""
-                            }`}
-                          >
-                            {SOURCE_NAMES[job.source] || job.source}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
-                          {job.description.slice(0, 120)}...
-                        </p>
-                      </button>
-                    </motion.div>
-                  ))}
-              </div>
-            </ScrollArea>
+            <VirtualJobList
+              jobs={filteredJobs}
+              onSelectJob={(job) => {
+                setSelectedJob(job);
+                detailModal.open();
+              }}
+            />
           )}
         </CardContent>
       </Card>
 
       {/* 职位详情弹窗 */}
-      <Dialog open={!!selectedJob} onOpenChange={() => setSelectedJob(null)}>
-        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto p-6">
-          {selectedJob && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-xl pr-6">
-                  {selectedJob.title}
-                </DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                {/* 基本信息 */}
-                <div className="flex flex-wrap gap-2">
-                  <Badge
-                    className={SOURCE_COLORS[selectedJob.source] || ""}
-                  >
-                    {SOURCE_NAMES[selectedJob.source] || selectedJob.source}
-                  </Badge>
-                  <Badge variant="outline">
-                    <MapPin className="h-3 w-3 mr-1" />
-                    {selectedJob.location}
-                  </Badge>
-                  <Badge variant="outline">
-                    <Hash className="h-3 w-3 mr-1" />
-                    {selectedJob.sourceId}
-                  </Badge>
-                </div>
+      <ModalBackdrop
+        isOpen={detailModal.isOpen}
+        onOpenChange={detailModal.setOpen}
+        isDismissable
+        className="backdrop-blur-sm"
+      >
+        <ModalContainer size="lg" scroll="inside">
+          <ModalDialog>
+            {selectedJob && (
+              <>
+                <HModalHeader>
+                  <ModalHeading className="text-xl">{selectedJob.title}</ModalHeading>
+                  <ModalCloseTrigger />
+                </HModalHeader>
+                <ModalBody>
+                  <div className="space-y-4">
+                    {/* 基本信息 */}
+                    <div className="flex flex-wrap gap-2">
+                      <Badge
+                        className={SOURCE_COLORS[selectedJob.source] || ""}
+                      >
+                        {SOURCE_NAMES[selectedJob.source] || selectedJob.source}
+                      </Badge>
+                      <Badge variant="outline">
+                        <MapPin className="h-3 w-3 mr-1" />
+                        {selectedJob.location}
+                      </Badge>
+                      <Badge variant="outline">
+                        <Hash className="h-3 w-3 mr-1" />
+                        {selectedJob.sourceId}
+                      </Badge>
+                    </div>
 
-                <Separator />
-
-                {/* 职位描述 */}
-                <div>
-                  <h4 className="font-semibold mb-2">职位描述</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                    {selectedJob.description}
-                  </p>
-                </div>
-
-                {selectedJob.requirements && (
-                  <>
                     <Separator />
+
+                    {/* 职位描述 */}
                     <div>
-                      <h4 className="font-semibold mb-2">职位要求</h4>
+                      <h4 className="font-semibold mb-2">职位描述</h4>
                       <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                        {selectedJob.requirements}
+                        {selectedJob.description}
                       </p>
                     </div>
-                  </>
-                )}
 
-                <Separator />
+                    {selectedJob.requirements && (
+                      <>
+                        <Separator />
+                        <div>
+                          <h4 className="font-semibold mb-2">职位要求</h4>
+                          <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
+                            {selectedJob.requirements}
+                          </p>
+                        </div>
+                      </>
+                    )}
 
-                {/* 跳转原始链接 */}
-                <a
-                  href={selectedJob.detailUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  查看原始职位页面
-                </a>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+                    <Separator />
+
+                    {/* 跳转原始链接 */}
+                    <a
+                      href={selectedJob.detailUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      查看原始职位页面
+                    </a>
+                  </div>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="outline" onClick={detailModal.close} className="cursor-pointer">
+                    关闭
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalDialog>
+        </ModalContainer>
+      </ModalBackdrop>
 
       {/* 清除数据确认弹窗 */}
-      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
-        <DialogContent className="sm:max-w-md" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+      <ModalBackdrop
+        isOpen={clearModal.isOpen}
+        onOpenChange={clearModal.setOpen}
+        isDismissable
+      >
+        <ModalContainer size="sm">
+          <ModalDialog>
+            <HModalHeader className="flex items-center gap-2">
               <Trash2 className="h-5 w-5 text-destructive" />
-              确认清除数据
-            </DialogTitle>
-            <DialogDescription>
-              此操作将永久删除所有已抓取的 <strong>{jobs.length}</strong> 个职位数据，且无法恢复。确定要继续吗？
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowClearConfirm(false)}
-              disabled={clearing}
-              className="cursor-pointer"
-            >
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleClearAll}
-              disabled={clearing}
-              className="cursor-pointer"
-            >
-              {clearing ? "清除中..." : "确认清除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <ModalHeading>确认清除数据</ModalHeading>
+            </HModalHeader>
+            <ModalBody>
+              <p className="text-sm text-muted-foreground">
+                此操作将永久删除所有已抓取的 <strong>{jobs.length}</strong> 个职位数据，且无法恢复。确定要继续吗？
+              </p>
+            </ModalBody>
+            <ModalFooter>
+              <Button
+                variant="outline"
+                onClick={clearModal.close}
+                disabled={clearing}
+                className="cursor-pointer"
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleClearAll}
+                disabled={clearing}
+                className="cursor-pointer"
+              >
+                {clearing ? "清除中..." : "确认清除"}
+              </Button>
+            </ModalFooter>
+          </ModalDialog>
+        </ModalContainer>
+      </ModalBackdrop>
     </>
+  );
+}
+
+/** 虚拟化职位列表 — 使用 @tanstack/react-virtual */
+const ROW_HEIGHT = 134;
+const GAP = 4;
+
+function VirtualJobList({
+  jobs,
+  onSelectJob,
+}: {
+  jobs: JobPosting[];
+  onSelectJob: (job: JobPosting) => void;
+}) {
+  "use no memo";
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: jobs.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    gap: GAP,
+    overscan: 5,
+  });
+
+  return (
+    <div
+      ref={parentRef}
+      className="h-125 overflow-y-auto overscroll-y-contain"
+      role="listbox"
+      aria-label="职位列表"
+    >
+      <div
+        className="relative w-full"
+        style={{ height: virtualizer.getTotalSize() }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const job = jobs[virtualRow.index];
+          return (
+            <div
+              key={job.id}
+              className="absolute left-0 w-full cursor-pointer border rounded-lg hover:bg-accent/50 transition-colors"
+              style={{
+                height: virtualRow.size,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              role="option"
+              aria-selected={false}
+              tabIndex={0}
+              onClick={() => onSelectJob(job)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectJob(job);
+                }
+              }}
+            >
+              <div className="w-full p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-base truncate">
+                      {job.title}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Building2 className="h-3.5 w-3.5" />
+                        {job.company}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5" />
+                        {job.location || "未知"}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Hash className="h-3.5 w-3.5" />
+                        {job.sourceId}
+                      </span>
+                    </div>
+                  </div>
+                  <Badge
+                    className={`shrink-0 ${SOURCE_COLORS[job.source] || ""}`}
+                  >
+                    {SOURCE_NAMES[job.source] || job.source}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                  {job.description.slice(0, 120)}...
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

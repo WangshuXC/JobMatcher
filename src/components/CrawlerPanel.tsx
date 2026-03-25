@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardContent } from "@heroui/react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
@@ -173,11 +173,9 @@ export default function CrawlerPanel({ onCrawlComplete, onJobsUpdate }: CrawlerP
 
   return (
     <Card className="border-border/50 shadow-lg">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-xl">
-          <Bot className="h-6 w-6 text-primary" />
-          智能爬虫 Agent
-        </CardTitle>
+      <CardHeader className="flex items-center gap-2 text-xl font-semibold">
+        <Bot className="h-6 w-6 text-primary" />
+        智能爬虫 Agent
       </CardHeader>
       <CardContent className="space-y-6">
         {/* 数据源选择 */}
@@ -192,11 +190,12 @@ export default function CrawlerPanel({ onCrawlComplete, onJobsUpdate }: CrawlerP
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
+                className="h-full"
               >
                 <button
                   type="button"
                   onClick={() => toggleSource(source.id)}
-                  className={`w-full p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
+                  className={`w-full h-full p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
                     selectedSources.includes(source.id)
                       ? "border-primary bg-primary/5 shadow-sm"
                       : "border-border hover:border-primary/50"

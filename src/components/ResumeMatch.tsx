@@ -2,19 +2,25 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardContent,
+  ModalBackdrop,
+  ModalContainer,
+  ModalDialog,
+  ModalHeader as HModalHeader,
+  ModalHeading,
+  ModalBody,
+  ModalFooter,
+  ModalCloseTrigger,
+  useOverlayState,
+} from "@heroui/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   FileText,
   Sparkles,
@@ -75,6 +81,8 @@ export default function ResumeMatch() {
   const [selectedMatch, setSelectedMatch] = useState<MatchResult | null>(null);
   const [error, setError] = useState("");
 
+  const matchDetailModal = useOverlayState();
+
   const handleMatch = async () => {
     if (!resumeText.trim()) {
       setError("请输入简历内容");
@@ -126,11 +134,9 @@ export default function ResumeMatch() {
   return (
     <>
       <Card className="border-border/50 shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <Brain className="h-6 w-6 text-primary" />
-            智能简历匹配
-          </CardTitle>
+        <CardHeader className="flex items-center gap-2 text-xl font-semibold">
+          <Brain className="h-6 w-6 text-primary" />
+          智能简历匹配
         </CardHeader>
         <CardContent className="space-y-4">
           {/* 简历输入 */}
@@ -253,7 +259,7 @@ export default function ResumeMatch() {
                   <TrendingUp className="h-4 w-4" />
                   匹配结果（共 {results.length} 个推荐职位）
                 </h3>
-                <ScrollArea className="h-[400px]">
+                <ScrollArea className="h-100">
                   <div className="space-y-3 pr-4">
                     {results.map((match, index) => (
                       <motion.div
@@ -264,7 +270,10 @@ export default function ResumeMatch() {
                       >
                         <button
                           type="button"
-                          onClick={() => setSelectedMatch(match)}
+                          onClick={() => {
+                            setSelectedMatch(match);
+                            matchDetailModal.open();
+                          }}
                           className="w-full text-left p-4 rounded-xl border border-border/50 hover:border-primary/50 hover:shadow-md transition-all cursor-pointer bg-card"
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -327,123 +336,133 @@ export default function ResumeMatch() {
       </Card>
 
       {/* 匹配详情弹窗 */}
-      <Dialog
-        open={!!selectedMatch}
-        onOpenChange={() => setSelectedMatch(null)}
+      <ModalBackdrop
+        isOpen={matchDetailModal.isOpen}
+        onOpenChange={matchDetailModal.setOpen}
+        isDismissable
+        className="backdrop-blur-sm"
       >
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          {selectedMatch && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-xl pr-6">
-                  {selectedMatch.job.title}
-                </DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                {/* 匹配总分 */}
-                <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/50">
-                  <div className="text-center">
-                    <div
-                      className={`text-4xl font-bold ${getScoreColor(
-                        selectedMatch.score
-                      )}`}
-                    >
-                      {selectedMatch.score}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      总匹配度
-                    </p>
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    {[
-                      { label: "技能匹配", value: selectedMatch.breakdown.skillMatch },
-                      { label: "地点匹配", value: selectedMatch.breakdown.locationMatch },
-                      { label: "经验匹配", value: selectedMatch.breakdown.experienceMatch },
-                      { label: "方向相关", value: selectedMatch.breakdown.roleRelevance },
-                    ].map((item) => (
-                      <div key={item.label} className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-16 shrink-0">
-                          {item.label}
-                        </span>
-                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${getScoreBg(item.value)}`}
-                            style={{ width: `${item.value}%` }}
-                          />
+        <ModalContainer size="lg" scroll="inside">
+          <ModalDialog>
+            {selectedMatch && (
+              <>
+                <HModalHeader>
+                  <ModalHeading className="text-xl">{selectedMatch.job.title}</ModalHeading>
+                  <ModalCloseTrigger />
+                </HModalHeader>
+                <ModalBody>
+                  <div className="space-y-4">
+                    {/* 匹配总分 */}
+                    <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/50">
+                      <div className="text-center">
+                        <div
+                          className={`text-4xl font-bold ${getScoreColor(
+                            selectedMatch.score
+                          )}`}
+                        >
+                          {selectedMatch.score}
                         </div>
-                        <span className="text-xs font-medium w-8 text-right">
-                          {item.value}
-                        </span>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          总匹配度
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      <div className="flex-1 space-y-2">
+                        {[
+                          { label: "技能匹配", value: selectedMatch.breakdown.skillMatch },
+                          { label: "地点匹配", value: selectedMatch.breakdown.locationMatch },
+                          { label: "经验匹配", value: selectedMatch.breakdown.experienceMatch },
+                          { label: "方向相关", value: selectedMatch.breakdown.roleRelevance },
+                        ].map((item) => (
+                          <div key={item.label} className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-16 shrink-0">
+                              {item.label}
+                            </span>
+                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${getScoreBg(item.value)}`}
+                                style={{ width: `${item.value}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium w-8 text-right">
+                              {item.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
-                {/* 匹配理由 */}
-                <div>
-                  <h4 className="font-semibold mb-2">匹配分析</h4>
-                  <div className="space-y-1">
-                    {selectedMatch.reasons.map((reason, i) => (
-                      <p
-                        key={i}
-                        className="text-sm text-muted-foreground flex items-start gap-2"
-                      >
-                        <span className="text-primary mt-0.5">•</span>
-                        {reason}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 职位信息 */}
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">
-                    <Building2 className="h-3 w-3 mr-1" />
-                    {selectedMatch.job.company}
-                  </Badge>
-                  <Badge variant="outline">
-                    <MapPin className="h-3 w-3 mr-1" />
-                    {selectedMatch.job.location}
-                  </Badge>
-                </div>
-
-                <div>
-                  <h4 className="font-semibold mb-2">职位描述</h4>
-                  <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                    {selectedMatch.job.description}
-                  </p>
-                </div>
-
-                {selectedMatch.job.requirements && (
-                  <>
-                    <Separator />
+                    {/* 匹配理由 */}
                     <div>
-                      <h4 className="font-semibold mb-2">职位要求</h4>
+                      <h4 className="font-semibold mb-2">匹配分析</h4>
+                      <div className="space-y-1">
+                        {selectedMatch.reasons.map((reason, i) => (
+                          <p
+                            key={i}
+                            className="text-sm text-muted-foreground flex items-start gap-2"
+                          >
+                            <span className="text-primary mt-0.5">•</span>
+                            {reason}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* 职位信息 */}
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="secondary">
+                        <Building2 className="h-3 w-3 mr-1" />
+                        {selectedMatch.job.company}
+                      </Badge>
+                      <Badge variant="outline">
+                        <MapPin className="h-3 w-3 mr-1" />
+                        {selectedMatch.job.location}
+                      </Badge>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold mb-2">职位描述</h4>
                       <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                        {selectedMatch.job.requirements}
+                        {selectedMatch.job.description}
                       </p>
                     </div>
-                  </>
-                )}
 
-                <Separator />
+                    {selectedMatch.job.requirements && (
+                      <>
+                        <Separator />
+                        <div>
+                          <h4 className="font-semibold mb-2">职位要求</h4>
+                          <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
+                            {selectedMatch.job.requirements}
+                          </p>
+                        </div>
+                      </>
+                    )}
 
-                <a
-                  href={selectedMatch.job.detailUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  查看原始职位页面
-                </a>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+                    <Separator />
+
+                    <a
+                      href={selectedMatch.job.detailUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      查看原始职位页面
+                    </a>
+                  </div>
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="outline" onClick={matchDetailModal.close} className="cursor-pointer">
+                    关闭
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalDialog>
+        </ModalContainer>
+      </ModalBackdrop>
     </>
   );
 }
