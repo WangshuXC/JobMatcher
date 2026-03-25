@@ -4,12 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
+import { type ReactNode } from "react";
 
 interface SearchBarProps {
   onSearch: () => void;
+  trailing?: ReactNode;
 }
 
-export default function SearchBar({ onSearch }: SearchBarProps) {
+export default function SearchBar({ onSearch, trailing }: SearchBarProps) {
   const keyword = useJobStore((s) => s.keyword);
   const setKeyword = useJobStore((s) => s.setKeyword);
 
@@ -29,6 +31,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
         <Search className="h-4 w-4 mr-1" />
         搜索
       </Button>
+      {trailing}
     </div>
   );
 }

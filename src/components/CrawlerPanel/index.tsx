@@ -15,7 +15,7 @@ export default function CrawlerPanel() {
   return (
     <Card className="border-border/50 shadow-lg">
       <CardHeader className="flex items-center gap-2 text-xl font-semibold">
-        <Bot className="h-6 w-6 text-primary" />
+        <Bot className="h-7 w-7 text-primary" />
         智能爬虫 Agent
       </CardHeader>
       <CardContent className="space-y-6">

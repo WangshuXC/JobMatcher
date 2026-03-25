@@ -1,8 +1,7 @@
 "use client";
 
-import { Card, CardHeader, CardContent, useOverlayState } from "@heroui/react";
-import { Button } from "@/components/ui/button";
-import { Briefcase, Trash2, Loader2 } from "lucide-react";
+import { Card, CardHeader, CardContent, useOverlayState, Dropdown, Label } from "@heroui/react";
+import { Briefcase, Trash2, Loader2, EllipsisVertical } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
 import SearchBar from "./SearchBar";
 import SourceFilter from "./SourceFilter";
@@ -38,27 +37,45 @@ export default function JobList() {
   return (
     <>
       <Card className="border-border/50 shadow-lg">
-        <CardHeader className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xl font-semibold">
-            <Briefcase className="h-6 w-6 text-primary" />
-            职位列表
-          </div>
-          <div className="flex items-center gap-2">
-            {jobs.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearModal.open}
-                className="cursor-pointer text-destructive hover:text-destructive hover:bg-destructive/10 my-2"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
-                清除数据
-              </Button>
-            )}
-          </div>
+        <CardHeader className="flex items-center gap-2 text-xl font-semibold">
+          <Briefcase className="h-6 w-6 text-primary" />
+          职位列表
         </CardHeader>
         <CardContent className="space-y-4">
-          <SearchBar onSearch={handleSearch} />
+
+          <SearchBar
+            onSearch={handleSearch}
+            trailing={
+              jobs.length > 0 ? (
+                <Dropdown>
+                  <Dropdown.Trigger
+                    aria-label="更多操作"
+                    className="button--icon-only data-[focus-visible=true]:status-focused"
+                  >
+                    <EllipsisVertical className="h-4 w-4 outline-none" />
+                  </Dropdown.Trigger>
+                  <Dropdown.Popover>
+                    <Dropdown.Menu
+                      onAction={(key) => {
+                        if (key === "clear-data") {
+                          clearModal.open();
+                        }
+                      }}
+                    >
+                      <Dropdown.Section>
+                        <Dropdown.Item id="clear-data" className="w-fit" textValue="清除数据" variant="danger">
+                          <div className="flex h-full items-center gap-2">
+                            <Trash2 className="size-4 text-danger" />
+                            <Label>清除数据</Label>
+                          </div>
+                        </Dropdown.Item>
+                      </Dropdown.Section>
+                    </Dropdown.Menu>
+                  </Dropdown.Popover>
+                </Dropdown>
+              ) : null
+            }
+          />
           <SourceFilter onFilter={handleFilter} />
 
           {/* 职位列表 */}
