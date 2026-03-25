@@ -4,22 +4,14 @@ import { useState, useCallback } from "react";
 import { motion } from "motion/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bot, Briefcase, Brain, Sparkles } from "lucide-react";
+import { useJobStore } from "@/stores/job-store";
 import CrawlerPanel from "@/components/CrawlerPanel";
 import JobList from "@/components/JobList";
 import ResumeMatch from "@/components/ResumeMatch";
 
 export default function HomePage() {
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [activeTab, setActiveTab] = useState("crawler");
-
-  const handleCrawlComplete = useCallback(() => {
-    setRefreshTrigger((prev) => prev + 1);
-  }, []);
-
-  /** 爬虫运行时每批新职位到达都触发 JobList 刷新 */
-  const handleJobsUpdate = useCallback(() => {
-    setRefreshTrigger((prev) => prev + 1);
-  }, []);
+  const triggerRefresh = useJobStore((s) => s.triggerRefresh);
 
   const handleTabChange = useCallback(
     (value: string | number | null) => {
@@ -27,10 +19,10 @@ export default function HomePage() {
       setActiveTab(tab);
       // 切换到"职位列表"时强制刷新
       if (tab === "jobs") {
-        setRefreshTrigger((prev) => prev + 1);
+        triggerRefresh();
       }
     },
-    []
+    [triggerRefresh]
   );
 
   return (
@@ -91,11 +83,11 @@ export default function HomePage() {
             transition={{ delay: 0.2 }}
           >
             <TabsContent value="crawler">
-              <CrawlerPanel onCrawlComplete={handleCrawlComplete} onJobsUpdate={handleJobsUpdate} />
+              <CrawlerPanel />
             </TabsContent>
 
             <TabsContent value="jobs">
-              <JobList refreshTrigger={refreshTrigger} />
+              <JobList />
             </TabsContent>
 
             <TabsContent value="match">
@@ -109,9 +101,6 @@ export default function HomePage() {
       <footer className="border-t border-border/50 mt-auto">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 text-center text-sm text-muted-foreground">
           <p>JobMatcher — 基于 Playwright 爬虫 Agent 的智能招聘匹配系统</p>
-          <p className="mt-1">
-            支持字节跳动、腾讯、阿里巴巴等大厂招聘数据聚合
-          </p>
         </div>
       </footer>
     </main>
