@@ -74,10 +74,14 @@ export abstract class BaseCrawler {
    * 抓取职位列表 - 返回基本信息和详情页URL列表
    * @param page - 浏览器页面
    * @param maxJobs - 最大抓取岗位数量
+   * @param selectedCategoryIds - 用户选中的大类 ID 列表（可选，undefined 表示使用默认）
+   * @param keyword - 搜索关键词（可选）
    */
   protected abstract crawlJobList(
     page: Page,
-    maxJobs: number
+    maxJobs: number,
+    selectedCategoryIds?: string[],
+    keyword?: string
   ): Promise<Partial<JobPosting>[]>;
 
   /**
@@ -163,8 +167,15 @@ export abstract class BaseCrawler {
    *
    * @param maxJobs - 最大抓取岗位数量（0 或不传表示全部抓取）
    * @param concurrency - 详情并行抓取并发数
+   * @param selectedCategoryIds - 用户选中的大类 ID 列表（可选，undefined 表示使用默认）
+   * @param keyword - 搜索关键词（可选）
    */
-  async crawl(maxJobs: number = 0, concurrency: number = DEFAULT_CONCURRENCY): Promise<CrawlResult> {
+  async crawl(
+    maxJobs: number = 0,
+    concurrency: number = DEFAULT_CONCURRENCY,
+    selectedCategoryIds?: string[],
+    keyword?: string
+  ): Promise<CrawlResult> {
     const startTime = Date.now();
     let status: CrawlerStatus = "running";
     let jobs: JobPosting[] = [];
@@ -192,7 +203,7 @@ export abstract class BaseCrawler {
       let partialJobs: Partial<JobPosting>[] = [];
       console.log(`[${this.source.name}] 正在抓取职位列表...`);
       try {
-        partialJobs = await this.crawlJobList(page, effectiveMax);
+        partialJobs = await this.crawlJobList(page, effectiveMax, selectedCategoryIds, keyword);
         console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
       } catch (err) {
         // crawlJobList 中途失败：记录错误但不终止，继续处理已获取的列表数据

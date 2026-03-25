@@ -1,24 +1,20 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { motion } from "motion/react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCallback } from "react";
+import { Tabs } from "@heroui/react";
 import { Bot, Briefcase, Brain, Sparkles } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
 import CrawlerPanel from "@/components/CrawlerPanel";
 import JobList from "@/components/JobList";
 import ResumeMatch from "@/components/ResumeMatch";
+import type { Key } from "react";
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState("crawler");
   const triggerRefresh = useJobStore((s) => s.triggerRefresh);
 
-  const handleTabChange = useCallback(
-    (value: string | number | null) => {
-      const tab = String(value ?? "crawler");
-      setActiveTab(tab);
-      // 切换到"职位列表"时强制刷新
-      if (tab === "jobs") {
+  const handleSelectionChange = useCallback(
+    (key: Key) => {
+      if (key === "jobs") {
         triggerRefresh();
       }
     },
@@ -30,70 +26,58 @@ export default function HomePage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4">
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-3"
-          >
+          <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center">
               <Sparkles className="h-6 w-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">
-                JobMatcher
-              </h1>
+              <h1 className="text-xl font-bold tracking-tight">JobMatcher</h1>
             </div>
-          </motion.div>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 h-12">
-            <TabsTrigger
-              value="crawler"
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <Bot className="h-4 w-4" />
-              <span className="hidden sm:inline">爬虫 Agent</span>
-              <span className="sm:hidden">爬虫</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="jobs"
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <Briefcase className="h-4 w-4" />
-              <span className="hidden sm:inline">职位列表</span>
-              <span className="sm:hidden">职位</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="match"
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <Brain className="h-4 w-4" />
-              <span className="hidden sm:inline">智能匹配</span>
-              <span className="sm:hidden">匹配</span>
-            </TabsTrigger>
-          </TabsList>
+        <Tabs
+          defaultSelectedKey="crawler"
+          onSelectionChange={handleSelectionChange}
+          className="space-y-6"
+        >
+          <Tabs.ListContainer>
+            <Tabs.List aria-label="功能导航">
+              <Tabs.Tab id="crawler" className="flex items-center gap-2 text-foreground">
+                <Tabs.Indicator />
+                <Bot className="h-4 w-4" />
+                <span className="hidden sm:inline">爬虫 Agent</span>
+                <span className="sm:hidden">爬虫</span>
+              </Tabs.Tab>
+              <Tabs.Tab id="jobs" className="flex items-center gap-2 text-foreground">
+                <Tabs.Indicator />
+                <Briefcase className="h-4 w-4" />
+                <span className="hidden sm:inline">职位列表</span>
+                <span className="sm:hidden">职位</span>
+              </Tabs.Tab>
+              <Tabs.Tab id="match" className="flex items-center gap-2 text-foreground">
+                <Tabs.Indicator />
+                <Brain className="h-4 w-4" />
+                <span className="hidden sm:inline">智能匹配</span>
+                <span className="sm:hidden">匹配</span>
+              </Tabs.Tab>
+            </Tabs.List>
+          </Tabs.ListContainer>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <TabsContent value="crawler">
-              <CrawlerPanel />
-            </TabsContent>
+          <Tabs.Panel id="crawler">
+            <CrawlerPanel />
+          </Tabs.Panel>
 
-            <TabsContent value="jobs">
-              <JobList />
-            </TabsContent>
+          <Tabs.Panel id="jobs">
+            <JobList />
+          </Tabs.Panel>
 
-            <TabsContent value="match">
-              <ResumeMatch />
-            </TabsContent>
-          </motion.div>
+          <Tabs.Panel id="match">
+            <ResumeMatch />
+          </Tabs.Panel>
         </Tabs>
       </div>
 

@@ -46,29 +46,31 @@ export default function MaxJobsControl() {
         />
       )}
 
-      {/* 快捷按钮 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant={isAllMode ? "default" : "outline"}
-          onClick={() => setMaxJobs(0)}
-          disabled={isRunning}
-          className="cursor-pointer text-xs px-3"
-        >
-          全部
-        </Button>
-        {QUICK_OPTIONS.map((n) => (
+      {/* 快捷按钮 + 岗位配置 */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 flex-1">
           <Button
-            key={n}
             size="sm"
-            variant={!isAllMode && maxJobs === n ? "default" : "outline"}
-            onClick={() => setMaxJobs(n)}
+            variant={isAllMode ? "default" : "outline"}
+            onClick={() => setMaxJobs(0)}
             disabled={isRunning}
             className="cursor-pointer text-xs px-3"
           >
-            {n} 个
+            全部
           </Button>
-        ))}
+          {QUICK_OPTIONS.map((n) => (
+            <Button
+              key={n}
+              size="sm"
+              variant={!isAllMode && maxJobs === n ? "default" : "outline"}
+              onClick={() => setMaxJobs(n)}
+              disabled={isRunning}
+              className="cursor-pointer text-xs px-3"
+            >
+              {n} 个
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -13,15 +13,17 @@
 import { NextRequest } from "next/server";
 import { getCrawler } from "@/lib/crawler/registry";
 import { jobStore } from "@/lib/store";
-import { JobPosting } from "@/types";
+import { JobPosting, CategoryConfig } from "@/types";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sources, maxJobs = 0 } = body as {
+  const { sources, maxJobs = 0, categoryConfig, keywordConfig } = body as {
     sources: string[];
     maxJobs?: number;
+    categoryConfig?: CategoryConfig;
+    keywordConfig?: Record<string, string>;
   };
 
   if (!sources || sources.length === 0) {
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
             });
           };
 
-          const result = await crawler.crawl(maxJobs);
+          const result = await crawler.crawl(maxJobs, undefined, categoryConfig?.[sourceId], keywordConfig?.[sourceId]);
 
           // 如果有些 jobs 没有通过 onJobsBatch 推送过（比如老爬虫没设置回调的情况），
           // 在这里补充存储

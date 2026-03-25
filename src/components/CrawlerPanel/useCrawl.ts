@@ -14,6 +14,8 @@ export function useCrawl() {
   const {
     selectedSources,
     maxJobs,
+    categoryConfig,
+    keywordConfig,
     setIsRunning,
     setSources,
     setSelectedSources,
@@ -50,7 +52,7 @@ export function useCrawl() {
       const response = await fetch("/api/crawl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sources: selectedSources, maxJobs }),
+        body: JSON.stringify({ sources: selectedSources, maxJobs, categoryConfig, keywordConfig }),
       });
 
       if (!response.ok || !response.body) {
@@ -122,6 +124,8 @@ export function useCrawl() {
   }, [
     selectedSources,
     maxJobs,
+    categoryConfig,
+    keywordConfig,
     setIsRunning,
     resetCrawlState,
     setProgressMsg,

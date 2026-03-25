@@ -18,7 +18,6 @@
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
 import { JobPosting, CrawlerSource } from "@/types";
-
 const PAGE_SIZE = 10;
 
 /** 腾讯 API 返回的职位数据结构 */
@@ -47,8 +46,32 @@ interface TencentApiResponse {
   };
 }
 
-/** 前端相关分类 ID */
-const CATEGORY_IDS = "40001001,40001002,40001003,40001004,40001005,40001006";
+/** 前端相关分类 ID (技术类子分类) */
+const CATEGORY_IDS = [
+  "40001001", // 技术研发类
+  "40001002", // 质量管理类
+  "40001003", // 技术运营类
+  "40001004", // 安全技术类
+  "40001005", // AI、算法与大数据
+  "40001006", // 企管类
+];
+
+/*
+ * 腾讯招聘完整分类参考:
+ *
+ * 大类 parentCategoryId:
+ *   40001 - 技术        (子分类: 40001001~40001006, 见上方)
+ *   40002 - 设计        (子分类: 40002001 设计类, 40002002 游戏美术类)
+ *   40003 - 产品        (子分类: 40003001 产品类)
+ *   40004 - 营销与公关
+ *   40005 - 销售、服务与支持
+ *   40006 - 内容
+ *   40007 - 财务
+ *   40008 - 人力资源
+ *   40009 - 法律与公共策略
+ *   40010 - 行政支持
+ *   40011 - 战略与投资
+ */
 
 export class TencentCrawler extends BaseCrawler {
   readonly source: CrawlerSource = {
@@ -65,10 +88,14 @@ export class TencentCrawler extends BaseCrawler {
    * 构建 API 查询 URL
    * attrId=1 表示社会招聘
    */
-  private buildApiUrl(pageIndex: number, keyword: string = "前端"): string {
+  private buildApiUrl(
+    pageIndex: number,
+    keyword: string = "前端",
+    categoryIds: string[] = CATEGORY_IDS
+  ): string {
     const timestamp = Date.now();
     const encodedKeyword = encodeURIComponent(keyword);
-    return `${this.source.baseUrl}/tencentcareer/api/post/Query?timestamp=${timestamp}&countryId=&cityId=&bgIds=&productId=&categoryId=${CATEGORY_IDS}&parentCategoryId=&attrId=1&keyword=${encodedKeyword}&pageIndex=${pageIndex}&pageSize=${PAGE_SIZE}&language=zh-cn&area=cn`;
+    return `${this.source.baseUrl}/tencentcareer/api/post/Query?timestamp=${timestamp}&countryId=&cityId=&bgIds=&productId=&categoryId=${categoryIds.join(",")}&parentCategoryId=&attrId=1&keyword=${encodedKeyword}&pageIndex=${pageIndex}&pageSize=${PAGE_SIZE}&language=zh-cn&area=cn`;
   }
 
   /**
@@ -84,9 +111,10 @@ export class TencentCrawler extends BaseCrawler {
   private async fetchApiData(
     page: Page,
     pageIndex: number,
-    keyword: string = "前端"
+    keyword: string = "前端",
+    categoryIds: string[] = CATEGORY_IDS
   ): Promise<TencentApiResponse | null> {
-    const apiUrl = this.buildApiUrl(pageIndex, keyword);
+    const apiUrl = this.buildApiUrl(pageIndex, keyword, categoryIds);
     console.log(`[腾讯] 调用 API 第 ${pageIndex} 页: ${apiUrl}`);
 
     try {
@@ -111,8 +139,26 @@ export class TencentCrawler extends BaseCrawler {
    */
   protected async crawlJobList(
     page: Page,
-    maxJobs: number
+    maxJobs: number,
+    selectedCategoryIds?: string[],
+    keyword?: string
   ): Promise<Partial<JobPosting>[]> {
+    // selectedCategoryIds 现在直接是子分类 ID 列表，无需展开
+    // 腾讯 API 的 categoryId 参数直接接受子分类 ID
+    const categoryIds =
+      selectedCategoryIds && selectedCategoryIds.length > 0
+        ? selectedCategoryIds
+        : CATEGORY_IDS;
+    // 优先使用用户传入的关键词；如果有自定义分类但没传 keyword，则不限关键词；否则默认搜"前端"
+    let searchKeyword: string;
+    if (keyword !== undefined) {
+      searchKeyword = keyword;
+    } else if (selectedCategoryIds && selectedCategoryIds.length > 0) {
+      searchKeyword = "";
+    } else {
+      searchKeyword = "前端";
+    }
+
     const allJobs: Partial<JobPosting>[] = [];
     const maxPages = Math.ceil(maxJobs / PAGE_SIZE);
 
@@ -121,7 +167,7 @@ export class TencentCrawler extends BaseCrawler {
     await this.randomDelay(1000, 2000);
 
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      const data = await this.fetchApiData(page, pageNum);
+      const data = await this.fetchApiData(page, pageNum, searchKeyword, categoryIds);
 
       if (!data || !data.Data.Posts || data.Data.Posts.length === 0) {
         console.log(`[腾讯] 第 ${pageNum} 页无数据，停止翻页`);

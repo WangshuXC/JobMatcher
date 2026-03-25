@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { CrawlerSource } from "@/types";
+import { CrawlerSource, CategoryConfig } from "@/types";
+import { getDefaultCategoryConfig } from "@/lib/crawler/categories";
 
 interface CrawlResultData {
   source: string;
@@ -8,6 +9,9 @@ interface CrawlResultData {
   message: string;
   duration?: number;
 }
+
+/** 每个数据源的关键词配置 */
+export type KeywordConfig = Record<string, string>;
 
 interface CrawlerState {
   /** 可用数据源列表 */
@@ -24,6 +28,10 @@ interface CrawlerState {
   progressMsg: string;
   /** 已入库的职位计数 */
   crawledCount: number;
+  /** 每个数据源选中的分类 ID（key: sourceId, value: 选中的大类 ID 列表） */
+  categoryConfig: CategoryConfig;
+  /** 每个数据源的搜索关键词（key: sourceId, value: keyword） */
+  keywordConfig: KeywordConfig;
 }
 
 interface CrawlerActions {
@@ -38,6 +46,12 @@ interface CrawlerActions {
   setCrawledCount: (count: number) => void;
   /** 重置一次爬取的临时状态 */
   resetCrawlState: () => void;
+  /** 设置某个数据源的分类选择 */
+  setCategoryConfig: (sourceId: string, categoryIds: string[]) => void;
+  /** 批量设置分类配置 */
+  setCategoryConfigAll: (config: CategoryConfig) => void;
+  /** 设置某个数据源的搜索关键词 */
+  setKeywordConfig: (sourceId: string, keyword: string) => void;
 }
 
 export type CrawlerStore = CrawlerState & CrawlerActions;
@@ -53,6 +67,8 @@ export const useCrawlerStore = create<CrawlerStore>((set) => ({
   maxJobs: 0,
   progressMsg: "",
   crawledCount: 0,
+  categoryConfig: getDefaultCategoryConfig(),
+  keywordConfig: {},
 
   // -- actions --
   setSources: (sources) => set({ sources }),
@@ -74,6 +90,18 @@ export const useCrawlerStore = create<CrawlerStore>((set) => ({
   setMaxJobs: (n) => set({ maxJobs: n }),
   setProgressMsg: (msg) => set({ progressMsg: msg }),
   setCrawledCount: (count) => set({ crawledCount: count }),
+
+  setCategoryConfig: (sourceId, categoryIds) =>
+    set((s) => ({
+      categoryConfig: { ...s.categoryConfig, [sourceId]: categoryIds },
+    })),
+
+  setCategoryConfigAll: (config) => set({ categoryConfig: config }),
+
+  setKeywordConfig: (sourceId, keyword) =>
+    set((s) => ({
+      keywordConfig: { ...s.keywordConfig, [sourceId]: keyword },
+    })),
 
   resetCrawlState: () =>
     set({ results: [], progressMsg: "", crawledCount: 0 }),

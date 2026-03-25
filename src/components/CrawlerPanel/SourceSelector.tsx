@@ -1,14 +1,31 @@
 "use client";
 
-import { motion } from "motion/react";
-import { Building2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Building2, Settings2 } from "lucide-react";
+import { Button } from "@heroui/react";
+import { Badge } from "@/components/ui/badge";
 import { useCrawlerStore } from "@/stores/crawler-store";
+import { SOURCE_CATEGORIES } from "@/lib/crawler/categories";
+import SourceConfigDrawer from "./SourceConfigDrawer";
 
 export default function SourceSelector() {
   const sources = useCrawlerStore((s) => s.sources);
   const selectedSources = useCrawlerStore((s) => s.selectedSources);
   const isRunning = useCrawlerStore((s) => s.isRunning);
   const toggleSource = useCrawlerStore((s) => s.toggleSource);
+  const categoryConfig = useCrawlerStore((s) => s.categoryConfig);
+
+  /** 当前打开 Drawer 的数据源 ID，null 表示关闭 */
+  const [drawerSourceId, setDrawerSourceId] = useState<string | null>(null);
+
+  /** 每个数据源在 store 中已选子分类数量（用于 Badge 显示） */
+  const sourceSelectedCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const source of sources) {
+      counts[source.id] = (categoryConfig[source.id] || []).length;
+    }
+    return counts;
+  }, [sources, categoryConfig]);
 
   return (
     <div>
@@ -16,37 +33,63 @@ export default function SourceSelector() {
         选择招聘数据源
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {sources.map((source, index) => (
-          <motion.div
-            key={source.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="h-full"
-          >
-            <button
-              type="button"
-              onClick={() => toggleSource(source.id)}
-              className={`w-full h-full p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
-                selectedSources.includes(source.id)
-                  ? "border-primary bg-primary/5 shadow-sm"
-                  : "border-border hover:border-primary/50"
-              }`}
-              disabled={isRunning}
-            >
-              <div className="flex items-center gap-3">
-                <Building2 className="h-5 w-5 text-muted-foreground shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold">{source.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {source.description}
-                  </p>
+        {sources.map((source) => {
+          const isSelected = selectedSources.includes(source.id);
+          const hasCategories = !!SOURCE_CATEGORIES[source.id];
+
+          return (
+            <div key={source.id} className="relative h-full">
+              {/* 数据源选择按钮 */}
+              <Button
+                variant={isSelected ? "outline" : "ghost"}
+                onPress={() => toggleSource(source.id)}
+                isDisabled={isRunning}
+                className={`w-full h-full rounded-xl border-2 p-4 justify-start transition-all ${
+                  isSelected
+                    ? "border-primary bg-primary/5 shadow-sm"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <div className="flex items-center gap-3 w-full">
+                  <Building2 className="h-5 w-5 text-muted-foreground shrink-0" />
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="font-semibold text-foreground">{source.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 text-ellipsis overflow-hidden whitespace-nowrap">
+                      {source.description}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </button>
-          </motion.div>
-        ))}
+              </Button>
+
+              {/* 右侧：配置按钮（绝对定位叠加） */}
+              {isSelected && hasCategories && (
+                <Button
+                  variant="primary"
+                  isIconOnly
+                  className="absolute right-4 top-1/2 -translate-y-1/2 h-8 w-8 min-w-8 cursor-pointer"
+                  onPress={() => setDrawerSourceId(source.id)}
+                  isDisabled={isRunning}
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {sourceSelectedCounts[source.id] > 0 && (
+                    <Badge
+                      className="absolute -top-1.5 -right-1.5 text-[9px] px-1 h-3.5 min-w-3.5 flex items-center justify-center"
+                    >
+                      {sourceSelectedCounts[source.id]}
+                    </Badge>
+                  )}
+                </Button>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* 岗位配置 Drawer */}
+      <SourceConfigDrawer
+        sourceId={drawerSourceId}
+        onClose={() => setDrawerSourceId(null)}
+      />
     </div>
   );
 }

@@ -109,6 +109,33 @@ export interface MatchBreakdown {
   roleRelevance: number;
 }
 
+// ==================== 分类配置相关类型 ====================
+
+/** 子分类 */
+export interface SubCategory {
+  /** 子分类 ID（各平台的原始 ID） */
+  id: string;
+  /** 子分类名称 */
+  name: string;
+}
+
+/** 数据源的岗位分类（大类） */
+export interface JobCategory {
+  /** 大类 ID（各平台的原始 ID） */
+  id: string;
+  /** 大类名称 */
+  name: string;
+  /** 子分类列表（带 ID 和名称） */
+  subCategories: SubCategory[];
+}
+
+/**
+ * 每个数据源的分类配置
+ * key: sourceId (bytedance / tencent / alibaba)
+ * value: 选中的**子分类 ID** 列表（精确到子分类粒度）
+ */
+export type CategoryConfig = Record<string, string[]>;
+
 // ==================== API 相关类型 ====================
 
 /** 爬虫请求参数 */
@@ -117,6 +144,8 @@ export interface CrawlRequest {
   keywords?: string;
   /** 期望抓取的岗位数量 */
   maxJobs?: number;
+  /** 每个数据源选中的分类 ID */
+  categoryConfig?: CategoryConfig;
 }
 
 /** 匹配请求参数 */
