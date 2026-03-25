@@ -13,9 +13,14 @@
  *   GET https://jobs.bytedance.com/api/v1/job/posts/{postId}?portal_type=2&with_recommend=true
  *
  * 关键参数：
- *   - job_category_id_list: ["6704215862603155720"] = 研发大类
+ *   - job_category_id_list: 通过精确的子类 ID 筛选，而非关键词模糊搜索
  *   - portal_type: 2 = 社招
  *   - limit: 最大 50
+ *
+ * 分类体系（选择"研发"大类时，前端会展开为以下所有子类 ID）：
+ *   - 6704215886108035339 = 前端开发（默认只爬取此子类）
+ *   - 6704215862603155720, 6704215862557018372, 6704215888985327886, ...
+ *   - 共 16 个子类覆盖研发全部方向
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
@@ -24,8 +29,32 @@ import { JobPosting, CrawlerSource } from "@/types";
 /** 每页最大条数（API 最大支持 50） */
 const PAGE_SIZE = 50;
 
-/** 研发大类 category ID */
-const CATEGORY_RD = "6704215862603155720";
+/** 前端开发子类 category ID */
+const CATEGORY_FRONTEND = "6704215886108035339";
+
+/**
+ * 研发大类下的所有子类 ID（共 16 个）
+ * 选择"研发"大类时，字节前端会将其展开为这些子类 ID 一并发送
+ * 保留此列表以备将来需要爬取全部研发岗位
+ */
+const CATEGORY_RD_ALL = [
+  "6704215886108035339", // 前端开发
+  "6704215862603155720",
+  "6704215862557018372",
+  "6704215888985327886",
+  "6704215897130666254",
+  "6704215956018694411",
+  "6704215957146962184",
+  "6704215958816295181",
+  "6704215963966900491",
+  "6704216109274368264",
+  "6704216296701036811",
+  "6704216635923761412",
+  "6704217321877014787",
+  "6704219452277262596",
+  "6704219534724696331",
+  "6938376045242353957",
+];
 
 /** API 基础地址 */
 const API_BASE = "https://jobs.bytedance.com/api/v1";
@@ -121,17 +150,22 @@ export class BytedanceCrawler extends BaseCrawler {
     description: "字节跳动（今日头条、抖音母公司）社会招聘",
   };
 
-  /** 构建搜索请求体 */
+  /**
+   * 构建搜索请求体
+   *
+   * 使用精确的分类 ID 筛选，不依赖关键词模糊搜索。
+   * 默认只筛选「前端开发」子类，传入 CATEGORY_RD_ALL 可获取全部研发岗位。
+   */
   private buildSearchBody(
     offset: number,
     limit: number = PAGE_SIZE,
-    keyword: string = "前端"
+    categoryIds: string[] = [CATEGORY_FRONTEND]
   ): BytedanceSearchBody {
     return {
-      keyword,
+      keyword: "",
       limit,
       offset,
-      job_category_id_list: [CATEGORY_RD],
+      job_category_id_list: categoryIds,
       tag_id_list: [],
       location_code_list: [],
       subject_id_list: [],
@@ -151,13 +185,13 @@ export class BytedanceCrawler extends BaseCrawler {
     page: Page,
     offset: number,
     limit: number = PAGE_SIZE,
-    keyword: string = "前端"
+    categoryIds: string[] = [CATEGORY_FRONTEND]
   ): Promise<BytedanceSearchResponse | null> {
-    const body = this.buildSearchBody(offset, limit, keyword);
+    const body = this.buildSearchBody(offset, limit, categoryIds);
     const apiUrl = `${API_BASE}/search/job/posts`;
 
     console.log(
-      `[字节跳动] 调用 API: offset=${offset}, limit=${limit}, keyword=${keyword}`
+      `[字节跳动] 调用 API: offset=${offset}, limit=${limit}, categories=${categoryIds.length}个`
     );
 
     try {
