@@ -12,6 +12,8 @@ import { BytedanceCrawler } from "./sources/bytedance";
 import { TencentCrawler } from "./sources/tencent";
 import { AlibabaCrawler } from "./sources/alibaba";
 import { AntgroupCrawler } from "./sources/antgroup";
+import { MeituanCrawler } from "./sources/meituan";
+import { JDCrawler } from "./sources/jd";
 
 /** 爬虫实例注册表 */
 const crawlerRegistry: Map<string, BaseCrawler> = new Map();
@@ -23,10 +25,10 @@ function registerAllCrawlers(): void {
     new TencentCrawler(),
     new AlibabaCrawler(),
     new AntgroupCrawler(),
+    new MeituanCrawler(),
+    new JDCrawler(),
     // === 新增数据源在此处添加 ===
     // new XiaomiCrawler(),
-    // new MeituanCrawler(),
-    // new JDCrawler(),
   ];
 
   for (const crawler of crawlers) {

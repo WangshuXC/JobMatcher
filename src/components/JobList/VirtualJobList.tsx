@@ -5,21 +5,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Badge } from "@/components/ui/badge";
 import { Building2, MapPin, Hash } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
+import { getSourceName, getSourceColor } from "@/lib/crawler/source-meta";
 
 const ROW_HEIGHT = 134;
 const GAP = 4;
-
-const SOURCE_COLORS: Record<string, string> = {
-  bytedance: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-  tencent: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  alibaba: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
-};
-
-const SOURCE_NAMES: Record<string, string> = {
-  bytedance: "字节跳动",
-  tencent: "腾讯",
-  alibaba: "阿里巴巴",
-};
 
 interface VirtualJobListProps {
   onSelectJob: (jobId: string) => void;
@@ -93,9 +82,9 @@ export default function VirtualJobList({ onSelectJob }: VirtualJobListProps) {
                     </div>
                   </div>
                   <Badge
-                    className={`shrink-0 ${SOURCE_COLORS[job.source] || ""}`}
+                    className={`shrink-0 ${getSourceColor(job.source)}`}
                   >
-                    {SOURCE_NAMES[job.source] || job.source}
+                    {getSourceName(job.source)}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground mt-2 line-clamp-2">

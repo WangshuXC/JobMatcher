@@ -15,12 +15,10 @@ import { useCrawlerStore, KeywordConfig } from "@/stores/crawler-store";
 import { SOURCE_CATEGORIES } from "@/lib/crawler/categories";
 import { JobCategory } from "@/types";
 
-/** 数据源中文名映射 */
-const SOURCE_NAMES: Record<string, string> = {
-  bytedance: "字节跳动",
-  tencent: "腾讯",
-  alibaba: "阿里巴巴",
-};
+/** 支持关键词搜索的数据源 */
+const KEYWORD_SOURCES = new Set(["tencent", "jd"]);
+
+import { getSourceName } from "@/lib/crawler/source-meta";
 
 interface SourceConfigDrawerProps {
   /** 当前配置的数据源 ID，null 表示关闭 */
@@ -149,7 +147,7 @@ export default function SourceConfigDrawer({
           <Drawer.Header className="border-b border-border/50">
             <Drawer.Heading className="text-base font-semibold">
               {sourceId
-                ? `${SOURCE_NAMES[sourceId] || sourceId} · 岗位配置`
+                ? `${getSourceName(sourceId)} · 岗位配置`
                 : "岗位配置"}
             </Drawer.Heading>
             <Drawer.CloseTrigger />
@@ -176,15 +174,15 @@ export default function SourceConfigDrawer({
                   </button>
                 </div>
 
-                {/* 腾讯数据源的关键词输入 */}
-                {sourceId === "tencent" && (
+                {/* 支持关键词搜索的数据源 */}
+                {sourceId && KEYWORD_SOURCES.has(sourceId) && (
                   <div>
                     <div className="flex items-center gap-2">
                       <Label className="text-xs text-muted-foreground whitespace-nowrap">
                         搜索关键词
                       </Label>
                       <Input
-                        aria-label="腾讯搜索关键词"
+                        aria-label="搜索关键词"
                         placeholder="输入关键词筛选岗位，如：前端、后端"
                         value={keywordDraft[sourceId] || ""}
                         onChange={(e) =>

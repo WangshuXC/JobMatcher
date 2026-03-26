@@ -15,18 +15,7 @@ import {
 } from "@heroui/react";
 import { MapPin, ExternalLink, Hash } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
-
-const SOURCE_COLORS: Record<string, string> = {
-  bytedance: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-  tencent: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  alibaba: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
-};
-
-const SOURCE_NAMES: Record<string, string> = {
-  bytedance: "字节跳动",
-  tencent: "腾讯",
-  alibaba: "阿里巴巴",
-};
+import { getSourceName, getSourceColor } from "@/lib/crawler/source-meta";
 
 interface JobDetailModalProps {
   isOpen: boolean;
@@ -63,9 +52,9 @@ export default function JobDetailModal({
                   {/* 基本信息 */}
                   <div className="flex flex-wrap gap-2">
                     <Badge
-                      className={SOURCE_COLORS[selectedJob.source] || ""}
+                      className={getSourceColor(selectedJob.source)}
                     >
-                      {SOURCE_NAMES[selectedJob.source] || selectedJob.source}
+                      {getSourceName(selectedJob.source)}
                     </Badge>
                     <Badge variant="outline">
                       <MapPin className="h-3 w-3 mr-1" />

@@ -452,6 +452,125 @@ export const ANTGROUP_CATEGORIES: JobCategory[] = [
   },
 ];
 
+// ==================== 美团 ====================
+
+export const MEITUAN_CATEGORIES: JobCategory[] = [
+  {
+    id: "11001",
+    name: "技术类",
+    subCategories: [
+      { id: "11001_1100101", name: "测试" },
+      { id: "11001_1100102", name: "运维" },
+      { id: "11001_1100105", name: "算法" },
+      { id: "11001_1100106", name: "硬件" },
+      { id: "11001_1100109", name: "软件" },
+    ],
+  },
+  {
+    id: "11002",
+    name: "产品类",
+    subCategories: [
+      { id: "11002_1100205", name: "硬件产品" },
+      { id: "11002_1100206", name: "产品" },
+    ],
+  },
+  {
+    id: "11008",
+    name: "商业分析类",
+    subCategories: [
+      { id: "11008_1100801", name: "商业分析" },
+    ],
+  },
+  {
+    id: "11009",
+    name: "零售类",
+    subCategories: [
+      { id: "11009_1100901", name: "物流" },
+      { id: "11009_1100902", name: "供应链" },
+      { id: "11009_1100903", name: "采购" },
+    ],
+  },
+  {
+    id: "11003",
+    name: "设计类",
+    subCategories: [
+      { id: "11003_1100301", name: "设计" },
+    ],
+  },
+  {
+    id: "11004",
+    name: "市场与传播类",
+    subCategories: [
+      { id: "11004_1100401", name: "市场" },
+      { id: "11004_1100402", name: "公关传播" },
+    ],
+  },
+  {
+    id: "11005",
+    name: "运营类",
+    subCategories: [
+      { id: "11005_1100501", name: "策略运营" },
+      { id: "11005_1100502", name: "内容运营" },
+      { id: "11005_1100503", name: "商家运营" },
+      { id: "11005_1100504", name: "活动运营" },
+    ],
+  },
+  {
+    id: "11006",
+    name: "职能类",
+    subCategories: [
+      { id: "11006_1100601", name: "法务" },
+      { id: "11006_1100602", name: "财务" },
+      { id: "11006_1100603", name: "人力资源" },
+      { id: "11006_1100604", name: "行政" },
+    ],
+  },
+  {
+    id: "11007",
+    name: "金融类",
+    subCategories: [
+      { id: "11007_1100701", name: "风险控制" },
+      { id: "11007_1100702", name: "资金规划" },
+      { id: "11007_1100703", name: "金融合规" },
+      { id: "11007_1100704", name: "综合支持" },
+    ],
+  },
+  {
+    id: "11010",
+    name: "销售、客服与支持类",
+    subCategories: [
+      { id: "11010_1101001", name: "销售" },
+      { id: "11010_1101002", name: "客服" },
+      { id: "11010_1101003", name: "业务支持" },
+    ],
+  },
+  {
+    id: "11011",
+    name: "综合类",
+    subCategories: [
+      { id: "11011_1101101", name: "综合管理" },
+    ],
+  },
+];
+
+// ==================== 京东 ====================
+//
+// 京东招聘的分类比较扁平，只有一级职位类型（jobTypeCode），没有子分类。
+// 为与项目两级分类体系一致，每个大类下仅有一个子分类（ID 与大类相同，名称一致）。
+//
+// 来源: /web/job/job_allparams API + 实际职位数据中的 jobTypeCode
+// 部门 (positionDeptName) 独立于职位类型，不作为分类维度，但显示在 category 中。
+//
+
+export const JD_CATEGORIES: JobCategory[] = [
+  { id: "YANFA", name: "研发类", subCategories: [] },
+  { id: "YUNGYUN", name: "运营类", subCategories: [] },
+  { id: "ZHINENG", name: "职能类", subCategories: [] },
+  { id: "CAIXIAO", name: "采销类", subCategories: [] },
+  { id: "JINRONGYW", name: "金融业务类", subCategories: [] },
+  { id: "KEFU", name: "客服类", subCategories: [] },
+];
+
 // ==================== 汇总导出 ====================
 
 /** 各数据源分类映射：sourceId → categories */
@@ -460,6 +579,8 @@ export const SOURCE_CATEGORIES: Record<string, JobCategory[]> = {
   tencent: TENCENT_CATEGORIES,
   alibaba: ALIBABA_CATEGORIES,
   antgroup: ANTGROUP_CATEGORIES,
+  meituan: MEITUAN_CATEGORIES,
+  jd: JD_CATEGORIES,
 };
 
 /**
@@ -472,6 +593,8 @@ export function getDefaultCategoryConfig(): Record<string, string[]> {
     tencent: TENCENT_CATEGORIES[0].subCategories.map((s) => s.id),     // 技术 → 全部子分类
     alibaba: ALIBABA_CATEGORIES[0].subCategories.map((s) => s.id),     // 技术 → 全部子分类
     antgroup: ANTGROUP_CATEGORIES[0].subCategories.map((s) => s.id),   // 技术 → 全部子分类
+    meituan: MEITUAN_CATEGORIES[0].subCategories.map((s) => s.id),     // 技术类 → 全部子分类
+    jd: [JD_CATEGORIES[0].id],                                          // 研发类（无子分类，直接选中大类 ID）
   };
 }
 

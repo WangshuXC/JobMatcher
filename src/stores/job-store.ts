@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { JobPosting } from "@/types";
 
+/** 地点分组结构（与 API 返回一致） */
+export interface LocationGroup {
+  label: string;
+  locations: { name: string; count: number }[];
+}
+
 interface JobState {
   /** 全量职位数据 */
   jobs: JobPosting[];
@@ -10,12 +16,12 @@ interface JobState {
   keyword: string;
   /** 选中的数据源 */
   selectedSource: string | null;
-  /** 选中的地点 */
-  selectedLocation: string;
+  /** 选中的地点列表（多选） */
+  selectedLocations: string[];
   /** 各数据源职位计数 */
   countBySource: Record<string, number>;
-  /** 可选地点列表 */
-  locations: string[];
+  /** 分组的地点列表 */
+  locationGroups: LocationGroup[];
   /** 是否正在初始加载 */
   initialLoading: boolean;
   /** 是否正在清除数据 */
@@ -31,9 +37,9 @@ interface JobActions {
   setFilteredJobs: (jobs: JobPosting[]) => void;
   setKeyword: (keyword: string) => void;
   setSelectedSource: (source: string | null) => void;
-  setSelectedLocation: (location: string) => void;
+  setSelectedLocations: (locations: string[]) => void;
   setCountBySource: (counts: Record<string, number>) => void;
-  setLocations: (locations: string[]) => void;
+  setLocationGroups: (groups: LocationGroup[]) => void;
   setInitialLoading: (loading: boolean) => void;
   setClearing: (clearing: boolean) => void;
   setSelectedJob: (job: JobPosting | null) => void;
@@ -45,7 +51,7 @@ interface JobActions {
   setJobData: (data: {
     jobs: JobPosting[];
     countBySource: Record<string, number>;
-    locations: string[];
+    locationGroups: LocationGroup[];
   }) => void;
 }
 
@@ -57,9 +63,9 @@ export const useJobStore = create<JobStore>((set) => ({
   filteredJobs: [],
   keyword: "",
   selectedSource: null,
-  selectedLocation: "__all__",
+  selectedLocations: [],
   countBySource: {},
-  locations: [],
+  locationGroups: [],
   initialLoading: true,
   clearing: false,
   selectedJob: null,
@@ -70,9 +76,9 @@ export const useJobStore = create<JobStore>((set) => ({
   setFilteredJobs: (jobs) => set({ filteredJobs: jobs }),
   setKeyword: (keyword) => set({ keyword }),
   setSelectedSource: (source) => set({ selectedSource: source }),
-  setSelectedLocation: (location) => set({ selectedLocation: location }),
+  setSelectedLocations: (locations) => set({ selectedLocations: locations }),
   setCountBySource: (counts) => set({ countBySource: counts }),
-  setLocations: (locations) => set({ locations }),
+  setLocationGroups: (groups) => set({ locationGroups: groups }),
   setInitialLoading: (loading) => set({ initialLoading: loading }),
   setClearing: (clearing) => set({ clearing: clearing }),
   setSelectedJob: (job) => set({ selectedJob: job }),
@@ -85,9 +91,9 @@ export const useJobStore = create<JobStore>((set) => ({
       jobs: [],
       filteredJobs: [],
       countBySource: {},
-      locations: [],
+      locationGroups: [],
       selectedSource: null,
-      selectedLocation: "__all__",
+      selectedLocations: [],
       keyword: "",
     }),
 
@@ -96,6 +102,6 @@ export const useJobStore = create<JobStore>((set) => ({
       jobs: data.jobs,
       filteredJobs: data.jobs,
       countBySource: data.countBySource,
-      locations: data.locations,
+      locationGroups: data.locationGroups,
     }),
 }));

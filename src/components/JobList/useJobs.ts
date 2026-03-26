@@ -13,7 +13,7 @@ export function useJobs() {
   const {
     selectedSource,
     keyword,
-    selectedLocation,
+    selectedLocations,
     refreshTrigger,
     setInitialLoading,
     setJobData,
@@ -22,18 +22,18 @@ export function useJobs() {
   } = useJobStore();
 
   // 用 ref 保存当前筛选条件，以便 refreshTrigger 触发时能读取最新值
-  const filtersRef = useRef({ source: selectedSource, keyword, location: selectedLocation });
+  const filtersRef = useRef({ source: selectedSource, keyword, locations: selectedLocations });
   useEffect(() => {
-    filtersRef.current = { source: selectedSource, keyword, location: selectedLocation };
-  }, [selectedSource, keyword, selectedLocation]);
+    filtersRef.current = { source: selectedSource, keyword, locations: selectedLocations };
+  }, [selectedSource, keyword, selectedLocations]);
 
   /** 通用请求函数 */
   const fetchJobs = useCallback(
-    async (source: string | null, kw: string, location: string | null) => {
+    async (source: string | null, kw: string, locations: string[]) => {
       const params = new URLSearchParams();
       if (source) params.set("source", source);
       if (kw) params.set("keyword", kw);
-      if (location && location !== "__all__") params.set("location", location);
+      if (locations.length > 0) params.set("location", locations.join(","));
 
       const response = await fetch(`/api/jobs?${params.toString()}`);
       const data = await response.json();
@@ -41,7 +41,7 @@ export function useJobs() {
         setJobData({
           jobs: data.data.jobs,
           countBySource: data.data.countBySource,
-          locations: data.data.locations || [],
+          locationGroups: data.data.locationGroups || [],
         });
       }
     },
@@ -54,11 +54,11 @@ export function useJobs() {
 
     const loadJobs = async () => {
       setInitialLoading(true);
-      const { source, keyword: kw, location } = filtersRef.current;
+      const { source, keyword: kw, locations } = filtersRef.current;
       const params = new URLSearchParams();
       if (source) params.set("source", source);
       if (kw) params.set("keyword", kw);
-      if (location && location !== "__all__") params.set("location", location);
+      if (locations.length > 0) params.set("location", locations.join(","));
 
       try {
         const response = await fetch(`/api/jobs?${params.toString()}`);
@@ -67,7 +67,7 @@ export function useJobs() {
           setJobData({
             jobs: data.data.jobs,
             countBySource: data.data.countBySource,
-            locations: data.data.locations || [],
+            locationGroups: data.data.locationGroups || [],
           });
         }
       } finally {
@@ -83,14 +83,14 @@ export function useJobs() {
 
   /** 搜索 */
   const handleSearch = useCallback(() => {
-    const { source, keyword: kw, location } = filtersRef.current;
-    fetchJobs(source, kw, location);
+    const { source, keyword: kw, locations } = filtersRef.current;
+    fetchJobs(source, kw, locations);
   }, [fetchJobs]);
 
   /** 按数据源/地点筛选 */
   const handleFilter = useCallback(
-    (source: string | null, location: string) => {
-      fetchJobs(source, filtersRef.current.keyword, location);
+    (source: string | null, locations: string[]) => {
+      fetchJobs(source, filtersRef.current.keyword, locations);
     },
     [fetchJobs]
   );
