@@ -8,7 +8,7 @@ provider:
 
 # 添加新数据源爬虫 Skill
 
-本 Skill 指导你为 JobMatcher 项目添加新的招聘网站数据源。
+本 Skill 指导你为 JobMatcher 项目添加新的招聘网站数据源。基于字节跳动、腾讯、阿里巴巴、蚂蚁集团 4 个实际爬虫的开发经验总结。
 
 ---
 
@@ -22,9 +22,10 @@ src/
 │   ├── registry.ts          # 爬虫注册表（新增爬虫必须在此注册）
 │   ├── categories.ts        # 各数据源的岗位分类定义
 │   └── sources/
-│       ├── bytedance.ts     # 字节跳动爬虫
-│       ├── tencent.ts       # 腾讯爬虫
-│       └── alibaba.ts       # 阿里巴巴爬虫
+│       ├── bytedance.ts     # 字节跳动爬虫（context.request 方案）
+│       ├── tencent.ts       # 腾讯爬虫（page.evaluate 方案 + 详情 API）
+│       ├── alibaba.ts       # 阿里巴巴爬虫（多子站并行 + CSRF）
+│       └── antgroup.ts      # 蚂蚁集团爬虫（page.route 拦截 + CSRF）
 ├── types/index.ts           # 核心类型定义
 └── lib/store.ts             # 数据存储（内存 Map + data/jobs.json）
 ```
@@ -79,7 +80,7 @@ interface CrawlerSource {
 interface JobCategory {
   id: string;              // 大类 ID
   name: string;            // 大类名称
-  subCategories: SubCategory[];
+  subCategories: SubCategory[];  // 可为空数组（如腾讯的部分大类无子分类）
 }
 interface SubCategory {
   id: string;              // 子分类 ID
@@ -91,14 +92,75 @@ interface SubCategory {
 
 ## 3. 添加新数据源的步骤
 
+### 步骤 0：🔴 调试验证 API（最重要！）
+
+> **经验教训**：蚂蚁集团爬虫因为没有验证 API 的实际响应结构，导致经历了 4 轮修复。**绝不要凭猜测或文档假设 API 结构**。
+
+在编码前，**必须**用调试脚本实际调用 API 并打印完整响应：
+
+```typescript
+// debug-{name}.ts — 临时调试脚本，验证后删除
+import { chromium } from "playwright";
+
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  // 1. 先访问目标网站建立 cookie/session
+  await page.goto("https://xxx.com/careers", { waitUntil: "domcontentloaded" });
+  await new Promise((r) => setTimeout(r, 3000));
+
+  // 2. 打印所有 cookie（确认 cookie 名和值）
+  const cookies = await context.cookies("https://xxx.com");
+  console.log("=== COOKIES ===");
+  cookies.forEach((c) => console.log(`  ${c.name} = ${c.value.substring(0, 50)}`));
+
+  // 3. 调用 API 并打印完整响应结构
+  const res = await page.evaluate(async () => {
+    const r = await fetch("/api/jobs/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageSize: 5, pageIndex: 1 }),
+    });
+    return { status: r.status, contentType: r.headers.get("content-type"), body: await r.text() };
+  });
+  console.log("=== API RESPONSE ===");
+  console.log("Status:", res.status);
+  console.log("Content-Type:", res.contentType);
+  const data = JSON.parse(res.body);
+  console.log("Top-level keys:", Object.keys(data));
+  console.log("Full response:", JSON.stringify(data, null, 2).substring(0, 3000));
+
+  // 4. 如果有分页，打印分页相关字段
+  // console.log("totalCount:", data.totalCount ?? data.data?.count ?? data.total);
+
+  // 5. 如果有职位数据，打印第一条的所有字段
+  // const firstJob = data.content?.[0] ?? data.data?.list?.[0] ?? data.data?.posts?.[0];
+  // if (firstJob) console.log("First job keys:", Object.keys(firstJob));
+
+  await browser.close();
+})();
+```
+
+**必须确认的信息**：
+1. ✅ API 的**实际请求路径**（不要靠猜测，看 DevTools Network 面板的真实请求）
+2. ✅ API 响应的**完整 JSON 结构**（直接打印，不要假设字段名和嵌套层级）
+3. ✅ CSRF/Token 的 **cookie 名是什么**（打印所有 cookie，逐一确认）
+4. ✅ 分页字段的**确切名称和位置**（是在顶层还是嵌套在 data/content 里）
+5. ✅ 职位对象的**所有字段名和类型**（特别注意 string vs string[]、嵌套对象 vs 扁平结构）
+6. ✅ API 是否需要特定 **Origin/Referer/Token** 头（尝试不带这些头看是否 403）
+
 ### 步骤 1：分析目标网站 API
 
-在编码前，先用浏览器 DevTools 分析目标网站：
+用浏览器 DevTools 的 **Network 面板**分析：
 - **列表 API**：找到职位搜索/列表的 JSON API，记录 URL、请求方法、请求体、响应结构
 - **详情 API**：确认列表 API 是否已返回完整数据（description + requirement）；如否，找详情 API
-- **认证机制**：是否需要 Cookie/Session/CSRF Token？是否有反爬措施？
+- **认证机制**：是否需要 Cookie/Session/CSRF Token？
+- **代理架构**：API 请求是在 nginx/CDN 层面路由，还是在前端 JS 层面代理？（决定用方案 B 还是方案 D）
 - **分页参数**：页码/偏移量字段名、每页大小限制、总数字段名
 - **分类体系**：URL 参数或请求体中的分类 ID 及对应名称
+- **岗位类型过滤**：是否包含校招/实习岗位？如何区分社招？
 
 ### 步骤 2：创建爬虫文件 `src/lib/crawler/sources/{name}.ts`
 
@@ -106,17 +168,28 @@ interface SubCategory {
 /**
  * {公司名}招聘爬虫
  *
- * [在这里详细描述 API 发现、请求策略、认证机制等]
+ * 🔍 API 发现（基于 DevTools 抓包 + 调试脚本验证）:
  *
  * 列表 API: [METHOD] [URL]
- *   [请求参数说明]
- *   [返回数据说明]
+ *   请求体: { pageSize, pageIndex, categoryId, ... }
+ *   响应体: { success, data: [...], totalCount, ... }  ← 用调试脚本实际确认的结构
  *
  * 详情 API: [METHOD] [URL]（如需要）
  *   [说明]
  *
+ * 认证机制:
+ *   - Cookie: [cookie 名] = [值格式]     ← 如 ctoken = bigfish_ctoken_xxx
+ *   - CSRF: [参数名] = [cookie 值]        ← 如 ?ctoken=xxx
+ *   - Origin/Referer 校验: [是/否]
+ *
+ * 代理架构:
+ *   - [nginx 层 / JS runtime 层 / 无代理]  ← 决定 API 调用方案
+ *
  * 分类参数:
  *   [分类体系说明]
+ *
+ * 岗位过滤:
+ *   [社招/校招/实习的区分字段和值]
  */
 import { Page } from "playwright";
 import { BaseCrawler } from "../base";
@@ -124,7 +197,7 @@ import { JobPosting, CrawlerSource } from "@/types";
 
 const PAGE_SIZE = 50; // 根据 API 支持的最大值设定
 
-// === API 接口类型定义 ===
+// === API 接口类型定义（⚠️ 必须与调试脚本确认的实际响应结构完全一致） ===
 
 interface XxxSearchBody {
   // 列表 API 请求体字段
@@ -132,10 +205,13 @@ interface XxxSearchBody {
 
 interface XxxJobPost {
   // API 返回的单条职位数据
+  // ⚠️ 注意：用调试脚本打印 Object.keys(firstJob) 确认所有字段
+  //    不要从其他类似网站的 API 类比推断！
 }
 
 interface XxxSearchResponse {
   // 列表 API 完整响应
+  // ⚠️ 确认嵌套结构：content 是数组还是对象？totalCount 在哪一层？
 }
 
 export class XxxCrawler extends BaseCrawler {
@@ -166,6 +242,7 @@ export class XxxCrawler extends BaseCrawler {
    * 选择方案（见下方"API 调用策略"章节）：
    * - 方案 A: context.request（推荐，无需页面）
    * - 方案 B: page.evaluate + fetch（需要页面上下文时）
+   * - 方案 D: page.route + page.evaluate（前端 JS 代理架构时）
    */
   private async fetchSearchApi(
     offset: number,
@@ -259,13 +336,13 @@ export class XxxCrawler extends BaseCrawler {
       return [];
     }
 
-    const totalCount = firstData.data.count; // 根据实际响应结构调整
+    const totalCount = firstData.data.count; // ⚠️ 根据实际响应结构调整！
     const targetCount = Math.min(totalCount, maxJobs);
     console.log(`[${this.source.name}] 共 ${totalCount} 个职位（目标 ${maxJobs === Infinity ? '全部' : maxJobs} 个）`);
 
     // 3. 解析并增量推送第 1 页
     const allJobs: Partial<JobPosting>[] = [];
-    for (const post of firstData.data.posts) {
+    for (const post of firstData.data.posts) { // ⚠️ 根据实际响应结构调整！
       if (allJobs.length >= maxJobs) break;
       allJobs.push(this.parsePost(post));
     }
@@ -298,7 +375,7 @@ export class XxxCrawler extends BaseCrawler {
 
       const batchJobs: Partial<JobPosting>[] = [];
       for (const data of results) {
-        if (!data?.data?.posts) continue;
+        if (!data?.data?.posts) continue; // ⚠️ 根据实际响应结构调整！
         for (const post of data.data.posts) {
           if (allJobs.length >= maxJobs) break;
           const job = this.parsePost(post);
@@ -356,7 +433,8 @@ export const XXX_CATEGORIES: JobCategory[] = [
       // ...
     ],
   },
-  // ...
+  // 注意：大类可以没有子分类（subCategories: []），
+  // 此时前端会将大类 ID 本身作为可选中的叶子节点
 ];
 
 // 在 SOURCE_CATEGORIES 中添加映射
@@ -364,6 +442,7 @@ export const SOURCE_CATEGORIES: Record<string, JobCategory[]> = {
   bytedance: BYTEDANCE_CATEGORIES,
   tencent: TENCENT_CATEGORIES,
   alibaba: ALIBABA_CATEGORIES,
+  antgroup: ANTGROUP_CATEGORIES,
   xxx: XXX_CATEGORIES,  // ← 新增
 };
 
@@ -373,6 +452,7 @@ export function getDefaultCategoryConfig(): Record<string, string[]> {
     bytedance: BYTEDANCE_CATEGORIES[0].subCategories.map((s) => s.id),
     tencent: TENCENT_CATEGORIES[0].subCategories.map((s) => s.id),
     alibaba: ALIBABA_CATEGORIES[0].subCategories.map((s) => s.id),
+    antgroup: ANTGROUP_CATEGORIES[0].subCategories.map((s) => s.id),
     xxx: XXX_CATEGORIES[0].subCategories.map((s) => s.id),  // ← 新增
   };
 }
@@ -388,22 +468,46 @@ function registerAllCrawlers(): void {
     new BytedanceCrawler(),
     new TencentCrawler(),
     new AlibabaCrawler(),
+    new AntgroupCrawler(),
     new XxxCrawler(),  // ← 新增
   ];
   // ...
 }
 ```
 
+### 步骤 5：运行验证
+
+```bash
+# 1. TypeScript 编译检查
+npx tsc --noEmit
+
+# 2. 实际运行测试（关键！）
+npx tsx -e "
+const { XxxCrawler } = require('./src/lib/crawler/sources/xxx');
+const c = new XxxCrawler();
+c.onJobsBatch = (jobs) => console.log('推送', jobs.length, '个职位:', jobs[0]?.title);
+c.onProgress = (cur, tot, msg) => console.log('进度:', msg);
+c.crawl(5).then(r => console.log('结果:', JSON.stringify(r, null, 2)));
+"
+```
+
 ---
 
-## 4. API 调用策略选择
+## 4. API 调用策略选择（四种方案）
 
-### 方案 A：`context.request`（推荐）
-- **适用场景**：API 不需要页面上下文、不需要 CSRF Token 从页面 Cookie 中提取、无严格的 Origin/Referer 校验
+### 方案 A：`context.request`（🏆 首选）
+- **适用场景**：API 不需要页面上下文、不需要 CSRF Token、无严格 Origin/Referer 校验
 - **优点**：无需创建浏览器页面，性能最好，天然共享 BrowserContext 的 cookies
-- **示例**：字节跳动（`this.context!.request.post(url, { data })`)
+- **实际使用**：字节跳动
+- **并行友好**：无需为每个并行任务创建 page，直接并发调用
 
 ```typescript
+// 先访问首页建立 cookie，然后关闭 page，之后纯 HTTP 调用
+const initPage = await this.newPage();
+await this.safeGoto(initPage, this.source.baseUrl);
+await initPage.close();
+
+// API 调用（不需要 page）
 const res = await this.context!.request.post(apiUrl, {
   headers: { "Content-Type": "application/json" },
   data: body,
@@ -412,11 +516,15 @@ const response = await res.json();
 ```
 
 ### 方案 B：`page.evaluate + fetch`
-- **适用场景**：API 需要页面上下文（如 CSRF Token 绑定到 Cookie、需要 baxia 等安全 JS SDK）
-- **注意**：必须先 `safeGoto` 到目标域名，不能在 `about:blank` 页面上执行 `fetch`
-- **示例**：阿里巴巴（需要 XSRF-TOKEN）、腾讯（需要 careers.tencent.com 的页面上下文）
+- **适用场景**：API 需要浏览器页面上下文（如 CSRF Token 从 Cookie 自动附带、需要特定 Origin）
+- **注意**：必须先 `safeGoto` 到目标域名；`page.evaluate` 在同一 page 上是**串行**的
+- **实际使用**：阿里巴巴（需要 XSRF-TOKEN）、腾讯（需要 careers.tencent.com 的 origin）
 
 ```typescript
+// 每个并行任务需要独立的 page（因为 page.evaluate 是串行的）
+const page = await this.newPage();
+await this.safeGoto(page, this.source.baseUrl);
+
 const response = await page.evaluate(
   async ({ url, body }) => {
     const res = await fetch(url, {
@@ -424,6 +532,10 @@ const response = await page.evaluate(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    // ⚠️ 防御性处理：先检查状态和 Content-Type，避免非 JSON 导致 SyntaxError
+    if (!res.ok) return { error: true, status: res.status, text: await res.text() };
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) return { error: true, status: res.status, text: await res.text() };
     return res.json();
   },
   { url: apiUrl, body }
@@ -435,32 +547,163 @@ const response = await page.evaluate(
 - **策略**：通过 `page.goto` + `page.evaluate` 解析 DOM 元素
 - **注意**：速度最慢（3-5s/页），应尽量避免
 
+### 方案 D：`page.route` 拦截 + `page.evaluate`（应对 JS 代理架构）
+- **适用场景**：🔴 前端 API 代理在 **JS runtime 层面**（如 tern/umi/bigfish 框架的 request 客户端），而非 nginx/CDN 层面。此时 `page.evaluate` 中的 `fetch` 无法利用前端代理，请求会被 nginx SPA fallback 拦截返回 HTML。
+- **判断方法**：如果 `page.evaluate(fetch('/api/xxx'))` 返回 HTML 而非 JSON，或返回 405 Method Not Allowed，说明 nginx 没有 API 路由，需要此方案
+- **核心思路**：用 Playwright 的 `page.route()` 在网络层面模拟前端框架的 API 代理
+- **实际使用**：蚂蚁集团
+
+```typescript
+/**
+ * 设置 API 路由拦截
+ * 将前端 JS 发出的 /api/xxx 请求转发到真实后端域名
+ */
+private async setupApiRoute(page: Page): Promise<void> {
+  await page.route("**/api/xxx/search**", async (route) => {
+    const url = new URL(route.request().url());
+    // 替换域名为真实后端
+    const backendUrl = `https://backend.xxx.com${url.pathname}${url.search}`;
+    try {
+      const response = await route.fetch({
+        url: backendUrl,
+        headers: {
+          ...route.request().headers(),
+          referer: "https://frontend.xxx.com/",
+          origin: "https://frontend.xxx.com",
+        },
+      });
+      await route.fulfill({ response });
+    } catch (err) {
+      console.log(`route 转发失败: ${(err as Error).message?.substring(0, 100)}`);
+      await route.abort();
+    }
+  });
+}
+
+// 使用方式
+const page = await this.newPage();
+await this.setupApiRoute(page);  // 先设置拦截
+await this.safeGoto(page, this.source.baseUrl);  // 再导航
+
+// page.evaluate 中的 fetch 会被 route 拦截并转发到后端
+const response = await page.evaluate(async ({ url, body }) => {
+  const res = await fetch(url, { method: "POST", ... });
+  return res.json();
+}, { url: "/api/xxx/search?token=...", body });
+
+// ⚠️ 关闭 page 前必须先取消 route，避免前端残留请求报错
+await page.unroute("**/api/xxx/search**");
+await page.close();
+```
+
+### 方案选择决策树
+
+```
+API 是否需要 CSRF Token 或特定 Origin？
+├── 否 → 方案 A: context.request ✅
+└── 是 → page.evaluate(fetch('/api/...')) 能否直接获取 JSON？
+    ├── 能 → 方案 B: page.evaluate + fetch
+    └── 不能（返回 HTML / 405） → 前端是 JS 代理架构
+        └── 方案 D: page.route 拦截 + page.evaluate
+```
+
 ---
 
-## 5. 关键设计模式
+## 5. CSRF/Token 处理指南
 
-### 增量推送模式（推荐）
+### 5.1 识别 CSRF 机制
+
+不同网站的 CSRF 机制差异很大，**不要假设**，必须实际调试确认：
+
+| 确认项 | 方法 | 常见陷阱 |
+|--------|------|----------|
+| Cookie 名 | 打印全部 cookie，逐一检查 | 🔴 cookie 名和值容易混淆（蚂蚁的教训：cookie 名是 `ctoken`，值是 `bigfish_ctoken_xxx`） |
+| 参数名 | 看 DevTools 中 API 请求的 URL 或 Headers | 🔴 参数名可能和 cookie 名不同（阿里: cookie `XSRF-TOKEN` → 参数 `_csrf`） |
+| Token 来源 | cookie / meta 标签 / 接口返回 | 一些网站的 token 在 `<meta name="csrf-token">` 中 |
+| Token 作用域 | 每个子站域名独立 / 全局共享 | 🔴 阿里的 CSRF token 按子站域名隔离，跨站复用会 403 |
+
+### 5.2 获取 CSRF Token
+
+```typescript
+// 从 cookie 获取（最常见）
+private async getCSRFToken(page: Page, domain?: string): Promise<string> {
+  const targetUrl = domain || this.source.baseUrl;
+  const cookies = await page.context().cookies(targetUrl);
+  // ⚠️ 用调试脚本确认的 cookie 名，不要猜
+  const tokenCookie = cookies.find((c) => c.name === "确认的cookie名");
+  return tokenCookie?.value || "";
+}
+
+// 从 meta 标签获取
+private async getCSRFToken(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta?.getAttribute("content") || "";
+  });
+}
+```
+
+### 5.3 Cookie 时序问题
+
+某些 cookie 不是服务器响应头 `Set-Cookie` 设置的，而是**前端 JS 运行后才写入**的。
+- 如果 `safeGoto` (waitUntil: domcontentloaded) 之后 cookie 不存在，需要额外等待
+- 用 `waitForFunction` 或轮询检测：
+
+```typescript
+// 等待特定 cookie 出现
+for (let i = 0; i < 10; i++) {
+  await this.randomDelay(500, 500);
+  const cookies = await page.context().cookies(this.source.baseUrl);
+  if (cookies.find(c => c.name === "xxx")) break;
+}
+```
+
+---
+
+## 6. 关键设计模式
+
+### 增量推送模式（🏆 推荐，所有爬虫都在用）
 如果列表 API 已返回完整数据（description + requirement），**在 `crawlJobList` 内直接通过 `this.onJobsBatch` 推送，然后返回空数组 `[]`**，跳过 base.ts 的 `crawlDetailsInParallel` 阶段。
 
-这样做的好处：
+**所有 4 个现有爬虫都使用此模式**（包括腾讯，虽然需要额外调用详情 API，但也在 crawlJobList 内完成）。
+
+好处：
 - 避免 base.ts 为每个职位创建独立 page 的开销
-- 避免每批 1-2s 的 randomDelay
+- 避免 N 批 × 1-2s 的 randomDelay（字节 6480 个职位节省了约 8 分钟）
 - 数据实时推送到前端
 
-### 两阶段模式
-如果列表 API 不返回完整数据（如腾讯的列表 API 缺少 Requirement），有两种选择：
-1. **在 `crawlJobList` 内自行并行调用详情 API**（推荐，见腾讯实现），然后返回 `[]`
-2. **返回 `Partial<JobPosting>[]`**，让 base.ts 的 `crawlDetailsInParallel` 自动调用 `crawlJobDetail`
+### 两阶段模式（列表 + 详情）
+如果列表 API 不返回完整数据（如腾讯的列表 API 缺少 Requirement）：
+1. **在 `crawlJobList` 内自行并行调用详情 API**（🏆 推荐，见腾讯实现），然后返回 `[]`
+2. ~~返回 `Partial<JobPosting>[]`，让 base.ts 的 crawlDetailsInParallel 自动调用 crawlJobDetail~~（不推荐，性能差）
+
+腾讯的做法：列表抓取 → 20 路并发调用详情 API 补全 Requirement → onJobsBatch 推送 → 返回 `[]`
 
 ### 子站并行模式
-如果目标公司有多个子站（如阿里巴巴），使用并行 + 独立 session 模式：
+如果目标公司有多个子站（如阿里巴巴的 8 个子集团），使用并行 + 独立 session 模式：
 ```
-每 N 个子站并行 → 各自 newPage + safeGoto + 提取 CSRF → 串行翻页（或并行翻页）
+每 N 个子站并行（N=4）
+  → 各自 newPage + safeGoto（独立 cookie/session）
+  → 各自提取 CSRF Token（⚠️ 必须按子站域名过滤 cookie！）
+  → 子站内串行或并行翻页（并发=5）
+  → 全局 seenIds 去重（跨子站可能有重复岗位）
+```
+
+### 分类分组查询模式
+如果 API 要求按大类分别查询（如阿里、蚂蚁）：
+```typescript
+// 将用户选择的子分类 ID 按大类分组
+const categoryGroups = this.groupByParentCategory(selectedCategoryIds);
+// 按大类逐组查询（或并行查询）
+for (const [parentId, subIds] of categoryGroups) {
+  const data = await this.fetchSearchApi(parentId, subIds, ...);
+  // ...
+}
 ```
 
 ---
 
-## 6. 注意事项
+## 7. 注意事项
 
 ### 必须遵守的规范
 - `source.id` 必须全局唯一（小写英文，如 `"meituan"`、`"jd"`、`"xiaomi"`）
@@ -470,13 +713,55 @@ const response = await page.evaluate(
 - 每个批次间必须有 `randomDelay` 防止反爬（建议 300-800ms）
 
 ### 性能优先级
-1. `context.request`（无页面，纯 HTTP）> 2. `page.evaluate(fetch)`（需页面上下文）> 3. DOM 解析（最慢）
+1. `context.request`（无页面，纯 HTTP）> 2. `page.evaluate(fetch)`（需页面上下文）> 3. `page.route + evaluate`（模拟代理）> 4. DOM 解析（最慢）
 
-### 常见坑
-- **about:blank 的 fetch 会跨域失败**：新创建的 page URL 是 `about:blank`，origin 为 `null`，必须先 `safeGoto` 到目标域名
-- **Cookie 共享 ≠ 页面上下文共享**：BrowserContext 的 Cookie 共享，但 `page.evaluate` 中 `fetch` 的 origin 取决于当前页面 URL
-- **PAGE_SIZE 设尽量大**：减少请求次数（查看 API 文档确认最大值）
-- **不要忘记注册分类**：`categories.ts` 的 `SOURCE_CATEGORIES` 和 `getDefaultCategoryConfig` 都要添加
+### 🔴 常见坑（血泪教训）
+
+#### 坑 1：API 响应结构假设错误
+> 蚂蚁集团教训：从阿里巴巴的结构 `{ content: { datas: [], totalCount } }` 推断蚂蚁也一样，但实际是 `{ content: [], totalCount }`（content 直接是数组，totalCount 在顶层）。导致 `content.datas` 始终 undefined → 0 条数据。
+
+✅ **解决**：必须用调试脚本打印实际响应，**不要从相似网站类比推断**。
+
+#### 坑 2：Cookie 名和值混淆
+> 蚂蚁集团教训：看到请求 URL 中 `ctoken=bigfish_ctoken_xxx`，误以为 cookie 名是 `bigfish_ctoken`。实际 cookie 名是 `ctoken`，`bigfish_ctoken_xxx` 是它的值。
+
+✅ **解决**：打印所有 cookie 的 `name: value`，从列表中精确匹配。
+
+#### 坑 3：about:blank 页面的 fetch 跨域失败
+> 字节跳动教训：新创建的 page URL 是 `about:blank`，origin 为 `null`，`page.evaluate(() => fetch('https://...'))` 会被浏览器 CORS 拦截。
+
+✅ **解决**：要么用方案 A（`context.request`，无 CORS 限制），要么先 `safeGoto` 到目标域名。
+
+#### 坑 4：nginx 路由 vs JS 运行时代理
+> 蚂蚁集团教训：以为 API 路径 `/api/xxx` 能直接访问，但蚂蚁的 API 代理在 JS 框架层面（tern），nginx 只做 SPA fallback。`page.evaluate(fetch('/api/xxx', {method:'POST'}))` → nginx 返回 SPA HTML → POST 被拒绝 → 405。
+
+✅ **解决**：用方案 D（`page.route`）模拟前端框架的 API 代理。判断方法：如果 `curl -X GET https://site.com/api/xxx` 返回 HTML 而非 JSON，说明 nginx 没有 API 路由。
+
+#### 坑 5：CSRF Token 跨子站复用导致 403
+> 阿里巴巴教训：8 个子站共享 BrowserContext，但每个子站的 XSRF-TOKEN cookie 是域名隔离的。如果 `page.context().cookies()` 不传域名，会拿到第一个子站的 token，在其他子站使用会 403。
+
+✅ **解决**：`page.context().cookies(specificDomain)` 传入具体子站域名。
+
+#### 坑 6：page.evaluate 在同一 page 上串行执行
+> 腾讯教训：以为用 `Promise.all` 在同一个 page 上并行调用 `page.evaluate(fetch(...))` 能加速，但 Playwright 的 `page.evaluate` 在同一 page 上是**串行执行**的。
+
+✅ **解决**：真正的并行需要为每个并发任务创建**独立 page**。或者用方案 A（`context.request`）直接并行调用。
+
+#### 坑 7：page.route 残留请求导致报错
+> 蚂蚁集团教训：关闭 page 后，前端 JS 初始化时发出的请求还在 route 队列中，`route.fetch` 抛出 `Target page, context or browser has been closed`。
+
+✅ **解决**：关闭 page **之前**先 `page.unroute("**/api/xxx**")` 取消拦截。
+
+#### 坑 8：page.evaluate 中 fetch 非 JSON 响应导致 SyntaxError
+> 蚂蚁集团教训：API 路径错误时后端返回 HTML 错误页，`res.json()` 抛出 `SyntaxError: Unexpected token '<'`，未捕获导致整个爬虫崩溃。
+
+✅ **解决**：在 `page.evaluate` 内调用 `res.json()` 前，先检查 `res.ok` 和 `Content-Type`：
+```typescript
+if (!res.ok) return { error: true, status: res.status, text: await res.text() };
+const ct = res.headers.get("content-type") || "";
+if (!ct.includes("application/json")) return { error: true, text: await res.text() };
+return res.json();
+```
 
 ### 基类提供的工具方法
 | 方法 | 说明 |
@@ -490,28 +775,37 @@ const response = await page.evaluate(
 
 ---
 
-## 7. 现有爬虫参考对照
+## 8. 现有爬虫参考对照
 
-| 特性 | 字节跳动 | 腾讯 | 阿里巴巴 |
-|------|---------|------|---------|
-| API 调用方式 | `context.request.post` | `page.evaluate(fetch)` | `page.evaluate(fetch)` |
-| 列表 API 含完整数据 | ✅ | ❌（缺 Requirement） | ✅ |
-| 需要 CSRF/Token | ❌ | ❌ | ✅（XSRF-TOKEN） |
-| 认证机制 | Cookie（首页建立） | Cookie（首页建立） | Cookie + CSRF |
-| 子站模式 | 单站 | 单站 | 8 个子站并行 |
-| PAGE_SIZE | 50 | 100 | 20 |
-| 详情阶段 | 跳过（返回 []） | 自行并行（返回 []） | 跳过（返回 []） |
-| 列表并发 | 5 | 5 | 子站 4 并发 × 站内 5 并发 |
+| 特性 | 字节跳动 | 腾讯 | 阿里巴巴 | 蚂蚁集团 |
+|------|---------|------|---------|---------|
+| API 调用方式 | `context.request` | `page.evaluate` | `page.evaluate` | `page.route` + `page.evaluate` |
+| 列表 API 含完整数据 | ✅ | ❌（缺 Requirement） | ✅ | ✅ |
+| 需要 CSRF/Token | ❌ | ❌ | ✅（XSRF-TOKEN + _csrf） | ✅（ctoken cookie + ctoken 参数） |
+| 认证机制 | Cookie（首页建立） | Cookie（首页建立） | Cookie + CSRF | Cookie + CSRF + route 代理 |
+| 代理架构 | 直接 API | 直接 API | nginx 路由 | JS runtime 代理（tern 框架） |
+| 子站模式 | 单站 | 单站 | 8 个子站并行（4 并发） | 单站 |
+| PAGE_SIZE | 50 | 100 | 20 | 20 |
+| 详情阶段 | 跳过（返回 []） | crawlJobList 内并行调详情 API（返回 []） | 跳过（返回 []） | 跳过（返回 []） |
+| 列表并发 | 5 | 5 | 子站 4 并发 × 站内 5 并发 | 5 |
+| 详情并发 | N/A | 20 | N/A | N/A |
+| 去重 | 无需 | 无需 | seenIds 全局去重 | seenIds 全局去重 |
+| 社招过滤 | portal_type=2 | SourceID 区分内外部 | categoryType 过滤 | positionType + batchType 过滤 |
+| 反爬难度 | ⭐ 低 | ⭐ 低 | ⭐⭐ 中（CSRF + 多站） | ⭐⭐⭐ 高（CSRF + JS 代理 + route） |
 
 ---
 
-## 8. 完成后验证清单
+## 9. 完成后验证清单
 
 - [ ] 爬虫文件：`src/lib/crawler/sources/{name}.ts` — 继承 BaseCrawler，实现 `crawlJobList` + `crawlJobDetail`
-- [ ] 类型完整：定义了 API 请求/响应接口，`parsePost` 映射到 `Partial<JobPosting>`
+- [ ] **调试验证**：用调试脚本确认 API 路径、响应结构、cookie 名、分页字段全部正确
+- [ ] 类型完整：API 请求/响应接口定义与**实际返回完全一致**（不是凭推断写的）
 - [ ] 分类配置：`categories.ts` — 添加了 `XXX_CATEGORIES`、更新了 `SOURCE_CATEGORIES` 和 `getDefaultCategoryConfig()`
 - [ ] 注册爬虫：`registry.ts` — import 并加入 `crawlers` 数组
-- [ ] 增量推送：`crawlJobList` 中使用 `this.onJobsBatch` 推送数据
-- [ ] 进度报告：使用 `this.onProgress` 报告抓取进度
-- [ ] 防反爬：批次间有 `randomDelay`
+- [ ] 增量推送：`crawlJobList` 中使用 `this.onJobsBatch` 推送数据，返回 `[]` 跳过详情阶段
+- [ ] 进度报告：使用 `this.onProgress` 报告抓取进度，格式 `已抓取 X/Y 个职位`
+- [ ] 防反爬：批次间有 `randomDelay`（300-800ms）
+- [ ] 防御性错误处理：`page.evaluate` 中 fetch 先检查 `res.ok` 和 Content-Type
+- [ ] page 清理：如使用 `page.route`，关闭前先 `page.unroute`
 - [ ] TypeScript 无错误：`read_lints` 检查无报错
+- [ ] **实际运行测试**：`crawl(5)` 能成功抓到数据，职位信息完整（title/location/description/requirements）
