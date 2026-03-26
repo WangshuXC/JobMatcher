@@ -1,0 +1,517 @@
+---
+description: 当用户需要为 JobMatcher 项目添加新的招聘网站数据源爬虫时，使用此 skill。它包含完整的架构说明、类型定义、代码模板和分步操作指南。
+alwaysApply: false
+enabled: true
+updatedAt: 2026-03-26T07:26:48.815Z
+provider: 
+---
+
+# 添加新数据源爬虫 Skill
+
+本 Skill 指导你为 JobMatcher 项目添加新的招聘网站数据源。
+
+---
+
+## 1. 项目架构概览
+
+### 目录结构
+```
+src/
+├── lib/crawler/
+│   ├── base.ts              # BaseCrawler 抽象基类
+│   ├── registry.ts          # 爬虫注册表（新增爬虫必须在此注册）
+│   ├── categories.ts        # 各数据源的岗位分类定义
+│   └── sources/
+│       ├── bytedance.ts     # 字节跳动爬虫
+│       ├── tencent.ts       # 腾讯爬虫
+│       └── alibaba.ts       # 阿里巴巴爬虫
+├── types/index.ts           # 核心类型定义
+└── lib/store.ts             # 数据存储（内存 Map + data/jobs.json）
+```
+
+### 数据流
+```
+用户点击"开始抓取"
+  → POST /api/crawl (SSE 流)
+    → getCrawler(sourceId) 从 registry 获取爬虫
+    → crawler.crawl(maxJobs, concurrency, categoryIds, keyword)
+      → launchBrowser()
+      → crawlJobList(maxJobs, categoryIds?, keyword?)  [子类实现]
+      → crawlDetailsInParallel(partialJobs)             [基类自动执行，除非返回空数组跳过]
+      → closeBrowser()
+    → onJobsBatch 回调 → jobStore.upsertMany() + SSE 推送
+    → onProgress 回调 → SSE 推送进度
+```
+
+---
+
+## 2. 核心类型定义
+
+```typescript
+// 职位数据（最终存储单元）
+interface JobPosting {
+  id: string;              // 唯一标识：`${source.id}_${sourceId}`
+  title: string;           // 职位名称
+  company: string;         // 公司名称
+  source: string;          // 数据源标识（如 "bytedance"）
+  location: string;        // 工作地点（多个用"、"分隔）
+  sourceId: string;        // 原始平台职位 ID
+  description: string;     // 职位描述/职责
+  requirements: string;    // 职位要求
+  detailUrl: string;       // 详情页 URL
+  crawledAt: string;       // 抓取时间 ISO 格式
+  category?: string;       // 职位类别
+  salary?: string;         // 薪资范围（如有）
+}
+
+// 数据源配置
+interface CrawlerSource {
+  id: string;              // 唯一标识（小写英文，如 "meituan"）
+  name: string;            // 显示名称（如 "美团"）
+  company: string;         // 公司名称
+  logo?: string;           // Logo URL（favicon）
+  baseUrl: string;         // 招聘网站基础 URL
+  enabled: boolean;        // 是否启用
+  description: string;     // 描述信息
+}
+
+// 岗位分类（两级结构）
+interface JobCategory {
+  id: string;              // 大类 ID
+  name: string;            // 大类名称
+  subCategories: SubCategory[];
+}
+interface SubCategory {
+  id: string;              // 子分类 ID
+  name: string;            // 子分类名称
+}
+```
+
+---
+
+## 3. 添加新数据源的步骤
+
+### 步骤 1：分析目标网站 API
+
+在编码前，先用浏览器 DevTools 分析目标网站：
+- **列表 API**：找到职位搜索/列表的 JSON API，记录 URL、请求方法、请求体、响应结构
+- **详情 API**：确认列表 API 是否已返回完整数据（description + requirement）；如否，找详情 API
+- **认证机制**：是否需要 Cookie/Session/CSRF Token？是否有反爬措施？
+- **分页参数**：页码/偏移量字段名、每页大小限制、总数字段名
+- **分类体系**：URL 参数或请求体中的分类 ID 及对应名称
+
+### 步骤 2：创建爬虫文件 `src/lib/crawler/sources/{name}.ts`
+
+```typescript
+/**
+ * {公司名}招聘爬虫
+ *
+ * [在这里详细描述 API 发现、请求策略、认证机制等]
+ *
+ * 列表 API: [METHOD] [URL]
+ *   [请求参数说明]
+ *   [返回数据说明]
+ *
+ * 详情 API: [METHOD] [URL]（如需要）
+ *   [说明]
+ *
+ * 分类参数:
+ *   [分类体系说明]
+ */
+import { Page } from "playwright";
+import { BaseCrawler } from "../base";
+import { JobPosting, CrawlerSource } from "@/types";
+
+const PAGE_SIZE = 50; // 根据 API 支持的最大值设定
+
+// === API 接口类型定义 ===
+
+interface XxxSearchBody {
+  // 列表 API 请求体字段
+}
+
+interface XxxJobPost {
+  // API 返回的单条职位数据
+}
+
+interface XxxSearchResponse {
+  // 列表 API 完整响应
+}
+
+export class XxxCrawler extends BaseCrawler {
+  readonly source: CrawlerSource = {
+    id: "xxx",                    // 小写英文唯一标识
+    name: "XXX",                  // 中文显示名
+    company: "XXX公司",
+    logo: "https://xxx.com/favicon.ico",
+    baseUrl: "https://xxx.com",
+    enabled: true,
+    description: "XXX公司社会招聘",
+  };
+
+  // --- 私有辅助方法 ---
+
+  /**
+   * 构建搜索请求体
+   */
+  private buildSearchBody(offset: number, limit: number, categoryIds: string[]): XxxSearchBody {
+    return {
+      // ...
+    };
+  }
+
+  /**
+   * 调用列表搜索 API
+   *
+   * 选择方案（见下方"API 调用策略"章节）：
+   * - 方案 A: context.request（推荐，无需页面）
+   * - 方案 B: page.evaluate + fetch（需要页面上下文时）
+   */
+  private async fetchSearchApi(
+    offset: number,
+    limit: number,
+    categoryIds: string[]
+  ): Promise<XxxSearchResponse | null> {
+    const body = this.buildSearchBody(offset, limit, categoryIds);
+    const apiUrl = `...`;
+
+    console.log(`[${this.source.name}] 调用 API: offset=${offset}, limit=${limit}`);
+
+    try {
+      // 方案 A: context.request（推荐）
+      const res = await this.context!.request.post(apiUrl, {
+        headers: { "Content-Type": "application/json" },
+        data: body,
+      });
+      const response = await res.json();
+
+      if (/* 检查成功状态 */) {
+        return response as XxxSearchResponse;
+      }
+      console.log(`[${this.source.name}] API 返回异常:`, JSON.stringify(response).substring(0, 200));
+      return null;
+    } catch (err) {
+      console.log(`[${this.source.name}] API 调用失败:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * 解析单条 API 返回的职位数据
+   */
+  private parsePost(post: XxxJobPost): Partial<JobPosting> {
+    return {
+      id: `${this.source.id}_${post.id}`,
+      title: post.title,
+      source: this.source.id,
+      company: this.source.company,
+      sourceId: String(post.id),
+      detailUrl: `${this.source.baseUrl}/job/${post.id}`,
+      location: post.location || "未知",
+      description: post.description || "暂无描述",
+      requirements: post.requirement || "暂无要求",
+      category: post.category || "",
+      crawledAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Partial → 完整 JobPosting
+   */
+  private partialToFull(partial: Partial<JobPosting>): JobPosting {
+    return {
+      id: partial.id || `${this.source.id}_${partial.sourceId}`,
+      title: partial.title || "未知职位",
+      company: partial.company || this.source.company,
+      source: this.source.id,
+      location: partial.location || "未知",
+      sourceId: partial.sourceId || "",
+      description: partial.description || "暂无描述",
+      requirements: partial.requirements || "暂无要求",
+      detailUrl: partial.detailUrl || "",
+      crawledAt: partial.crawledAt || new Date().toISOString(),
+      category: partial.category,
+    };
+  }
+
+  /**
+   * 抓取职位列表（核心方法）
+   */
+  protected async crawlJobList(
+    maxJobs: number,
+    selectedCategoryIds?: string[],
+    keyword?: string
+  ): Promise<Partial<JobPosting>[]> {
+    const categoryIds = selectedCategoryIds?.length
+      ? selectedCategoryIds
+      : [/* 默认分类 ID */];
+
+    // 1. 先访问首页建立 cookie/session
+    const initPage = await this.newPage();
+    await this.safeGoto(initPage, this.source.baseUrl);
+    await this.randomDelay(1000, 2000);
+    await initPage.close();
+
+    // 2. 第 1 页获取 totalCount
+    const firstData = await this.fetchSearchApi(0, PAGE_SIZE, categoryIds);
+    if (!firstData || /* 无数据 */) {
+      console.log(`[${this.source.name}] 第 1 页无数据，终止`);
+      return [];
+    }
+
+    const totalCount = firstData.data.count; // 根据实际响应结构调整
+    const targetCount = Math.min(totalCount, maxJobs);
+    console.log(`[${this.source.name}] 共 ${totalCount} 个职位（目标 ${maxJobs === Infinity ? '全部' : maxJobs} 个）`);
+
+    // 3. 解析并增量推送第 1 页
+    const allJobs: Partial<JobPosting>[] = [];
+    for (const post of firstData.data.posts) {
+      if (allJobs.length >= maxJobs) break;
+      allJobs.push(this.parsePost(post));
+    }
+    if (allJobs.length > 0 && this.onJobsBatch) {
+      this.onJobsBatch(allJobs.map((j) => this.partialToFull(j)));
+    }
+    if (this.onProgress) {
+      this.onProgress(allJobs.length, targetCount, `已抓取 ${allJobs.length}/${targetCount} 个职位`);
+    }
+
+    // 4. 并行请求剩余页面
+    const LIST_CONCURRENCY = 5;
+    const totalPages = Math.ceil(targetCount / PAGE_SIZE);
+    const remainingOffsets = Array.from({ length: totalPages - 1 }, (_, i) => (i + 1) * PAGE_SIZE);
+
+    for (let i = 0; i < remainingOffsets.length && allJobs.length < maxJobs; i += LIST_CONCURRENCY) {
+      const batch = remainingOffsets.slice(i, i + LIST_CONCURRENCY);
+
+      const promises = batch.map(async (offset) => {
+        try {
+          const limit = Math.min(PAGE_SIZE, maxJobs - offset);
+          return await this.fetchSearchApi(offset, limit, categoryIds);
+        } catch (err) {
+          console.error(`[${this.source.name}] offset=${offset} 请求失败:`, err);
+          return null;
+        }
+      });
+
+      const results = await Promise.all(promises);
+
+      const batchJobs: Partial<JobPosting>[] = [];
+      for (const data of results) {
+        if (!data?.data?.posts) continue;
+        for (const post of data.data.posts) {
+          if (allJobs.length >= maxJobs) break;
+          const job = this.parsePost(post);
+          allJobs.push(job);
+          batchJobs.push(job);
+        }
+      }
+
+      // 增量推送
+      if (batchJobs.length > 0 && this.onJobsBatch) {
+        this.onJobsBatch(batchJobs.map((j) => this.partialToFull(j)));
+      }
+      if (this.onProgress) {
+        this.onProgress(allJobs.length, targetCount, `已抓取 ${allJobs.length}/${targetCount} 个职位`);
+      }
+
+      // 批次间短延迟
+      if (i + LIST_CONCURRENCY < remainingOffsets.length && allJobs.length < maxJobs) {
+        await this.randomDelay(300, 800);
+      }
+    }
+
+    console.log(`[${this.source.name}] 列表抓取完成，共 ${allJobs.length} 个职位`);
+
+    // 如果列表 API 已返回完整 description + requirement，返回空数组跳过详情阶段
+    // 如果需要单独抓详情，返回 allJobs 让 base.ts 的 crawlDetailsInParallel 处理
+    return [];
+  }
+
+  /**
+   * 抓取单个职位详情（基类接口实现）
+   *
+   * 如果 crawlJobList 已通过 onJobsBatch 推送完整数据并返回 []，
+   * 此方法不会被调用，但仍需实现。
+   */
+  protected async crawlJobDetail(
+    _page: Page,
+    partialJob: Partial<JobPosting>
+  ): Promise<JobPosting> {
+    return this.partialToFull(partialJob);
+  }
+}
+```
+
+### 步骤 3：在 `src/lib/crawler/categories.ts` 添加分类
+
+```typescript
+// 在文件中添加新数据源的分类定义
+export const XXX_CATEGORIES: JobCategory[] = [
+  {
+    id: "大类ID",
+    name: "大类名称",
+    subCategories: [
+      { id: "子分类ID", name: "子分类名称" },
+      // ...
+    ],
+  },
+  // ...
+];
+
+// 在 SOURCE_CATEGORIES 中添加映射
+export const SOURCE_CATEGORIES: Record<string, JobCategory[]> = {
+  bytedance: BYTEDANCE_CATEGORIES,
+  tencent: TENCENT_CATEGORIES,
+  alibaba: ALIBABA_CATEGORIES,
+  xxx: XXX_CATEGORIES,  // ← 新增
+};
+
+// 在 getDefaultCategoryConfig() 中添加默认选中
+export function getDefaultCategoryConfig(): Record<string, string[]> {
+  return {
+    bytedance: BYTEDANCE_CATEGORIES[0].subCategories.map((s) => s.id),
+    tencent: TENCENT_CATEGORIES[0].subCategories.map((s) => s.id),
+    alibaba: ALIBABA_CATEGORIES[0].subCategories.map((s) => s.id),
+    xxx: XXX_CATEGORIES[0].subCategories.map((s) => s.id),  // ← 新增
+  };
+}
+```
+
+### 步骤 4：在 `src/lib/crawler/registry.ts` 注册
+
+```typescript
+import { XxxCrawler } from "./sources/xxx";
+
+function registerAllCrawlers(): void {
+  const crawlers: BaseCrawler[] = [
+    new BytedanceCrawler(),
+    new TencentCrawler(),
+    new AlibabaCrawler(),
+    new XxxCrawler(),  // ← 新增
+  ];
+  // ...
+}
+```
+
+---
+
+## 4. API 调用策略选择
+
+### 方案 A：`context.request`（推荐）
+- **适用场景**：API 不需要页面上下文、不需要 CSRF Token 从页面 Cookie 中提取、无严格的 Origin/Referer 校验
+- **优点**：无需创建浏览器页面，性能最好，天然共享 BrowserContext 的 cookies
+- **示例**：字节跳动（`this.context!.request.post(url, { data })`)
+
+```typescript
+const res = await this.context!.request.post(apiUrl, {
+  headers: { "Content-Type": "application/json" },
+  data: body,
+});
+const response = await res.json();
+```
+
+### 方案 B：`page.evaluate + fetch`
+- **适用场景**：API 需要页面上下文（如 CSRF Token 绑定到 Cookie、需要 baxia 等安全 JS SDK）
+- **注意**：必须先 `safeGoto` 到目标域名，不能在 `about:blank` 页面上执行 `fetch`
+- **示例**：阿里巴巴（需要 XSRF-TOKEN）、腾讯（需要 careers.tencent.com 的页面上下文）
+
+```typescript
+const response = await page.evaluate(
+  async ({ url, body }) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  },
+  { url: apiUrl, body }
+);
+```
+
+### 方案 C：DOM 解析（最后手段）
+- **适用场景**：没有 JSON API，只有 SSR 渲染的 HTML 页面
+- **策略**：通过 `page.goto` + `page.evaluate` 解析 DOM 元素
+- **注意**：速度最慢（3-5s/页），应尽量避免
+
+---
+
+## 5. 关键设计模式
+
+### 增量推送模式（推荐）
+如果列表 API 已返回完整数据（description + requirement），**在 `crawlJobList` 内直接通过 `this.onJobsBatch` 推送，然后返回空数组 `[]`**，跳过 base.ts 的 `crawlDetailsInParallel` 阶段。
+
+这样做的好处：
+- 避免 base.ts 为每个职位创建独立 page 的开销
+- 避免每批 1-2s 的 randomDelay
+- 数据实时推送到前端
+
+### 两阶段模式
+如果列表 API 不返回完整数据（如腾讯的列表 API 缺少 Requirement），有两种选择：
+1. **在 `crawlJobList` 内自行并行调用详情 API**（推荐，见腾讯实现），然后返回 `[]`
+2. **返回 `Partial<JobPosting>[]`**，让 base.ts 的 `crawlDetailsInParallel` 自动调用 `crawlJobDetail`
+
+### 子站并行模式
+如果目标公司有多个子站（如阿里巴巴），使用并行 + 独立 session 模式：
+```
+每 N 个子站并行 → 各自 newPage + safeGoto + 提取 CSRF → 串行翻页（或并行翻页）
+```
+
+---
+
+## 6. 注意事项
+
+### 必须遵守的规范
+- `source.id` 必须全局唯一（小写英文，如 `"meituan"`、`"jd"`、`"xiaomi"`）
+- `JobPosting.id` 格式：`${source.id}_${原始ID}`
+- 进度消息统一为：`已抓取 X/Y 个职位`
+- API 请求使用参数化方式，**不能拼接用户输入到 SQL 或 URL 中**
+- 每个批次间必须有 `randomDelay` 防止反爬（建议 300-800ms）
+
+### 性能优先级
+1. `context.request`（无页面，纯 HTTP）> 2. `page.evaluate(fetch)`（需页面上下文）> 3. DOM 解析（最慢）
+
+### 常见坑
+- **about:blank 的 fetch 会跨域失败**：新创建的 page URL 是 `about:blank`，origin 为 `null`，必须先 `safeGoto` 到目标域名
+- **Cookie 共享 ≠ 页面上下文共享**：BrowserContext 的 Cookie 共享，但 `page.evaluate` 中 `fetch` 的 origin 取决于当前页面 URL
+- **PAGE_SIZE 设尽量大**：减少请求次数（查看 API 文档确认最大值）
+- **不要忘记注册分类**：`categories.ts` 的 `SOURCE_CATEGORIES` 和 `getDefaultCategoryConfig` 都要添加
+
+### 基类提供的工具方法
+| 方法 | 说明 |
+|------|------|
+| `this.newPage()` | 创建新页面（自动启动浏览器） |
+| `this.safeGoto(page, url)` | 安全导航，`domcontentloaded` + 30s 超时 |
+| `this.randomDelay(min, max)` | 随机延迟（毫秒） |
+| `this.context!.request.post/get(...)` | Playwright APIRequestContext |
+| `this.onJobsBatch?.(jobs)` | 增量推送回调 |
+| `this.onProgress?.(current, total, msg)` | 进度报告回调 |
+
+---
+
+## 7. 现有爬虫参考对照
+
+| 特性 | 字节跳动 | 腾讯 | 阿里巴巴 |
+|------|---------|------|---------|
+| API 调用方式 | `context.request.post` | `page.evaluate(fetch)` | `page.evaluate(fetch)` |
+| 列表 API 含完整数据 | ✅ | ❌（缺 Requirement） | ✅ |
+| 需要 CSRF/Token | ❌ | ❌ | ✅（XSRF-TOKEN） |
+| 认证机制 | Cookie（首页建立） | Cookie（首页建立） | Cookie + CSRF |
+| 子站模式 | 单站 | 单站 | 8 个子站并行 |
+| PAGE_SIZE | 50 | 100 | 20 |
+| 详情阶段 | 跳过（返回 []） | 自行并行（返回 []） | 跳过（返回 []） |
+| 列表并发 | 5 | 5 | 子站 4 并发 × 站内 5 并发 |
+
+---
+
+## 8. 完成后验证清单
+
+- [ ] 爬虫文件：`src/lib/crawler/sources/{name}.ts` — 继承 BaseCrawler，实现 `crawlJobList` + `crawlJobDetail`
+- [ ] 类型完整：定义了 API 请求/响应接口，`parsePost` 映射到 `Partial<JobPosting>`
+- [ ] 分类配置：`categories.ts` — 添加了 `XXX_CATEGORIES`、更新了 `SOURCE_CATEGORIES` 和 `getDefaultCategoryConfig()`
+- [ ] 注册爬虫：`registry.ts` — import 并加入 `crawlers` 数组
+- [ ] 增量推送：`crawlJobList` 中使用 `this.onJobsBatch` 推送数据
+- [ ] 进度报告：使用 `this.onProgress` 报告抓取进度
+- [ ] 防反爬：批次间有 `randomDelay`
+- [ ] TypeScript 无错误：`read_lints` 检查无报错

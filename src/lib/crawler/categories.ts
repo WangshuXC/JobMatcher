@@ -328,6 +328,130 @@ export const ALIBABA_CATEGORIES: JobCategory[] = [
   },
 ];
 
+// ==================== 蚂蚁集团 ====================
+//
+// 蚂蚁集团与阿里巴巴共享 new-careers-portal 后端架构，分类 ID 体系相似但不完全一致。
+// 以下分类覆盖蚂蚁集团社招的全部 6 大职类：
+//   技术类、产品类、运营类、设计类、风险策略类、综合类
+//
+// 来源:
+//   - 用户提供的招聘 URL 中 categories 参数 (技术类子分类 ID)
+//   - 蚂蚁集团官方招聘信息中的职类描述
+//   - 阿里系 new-careers-portal category/list API 的分类体系参照
+//
+
+export const ANTGROUP_CATEGORIES: JobCategory[] = [
+  {
+    id: "131",
+    name: "技术",
+    subCategories: [
+      { id: "132", name: "前端开发" },
+      { id: "133", name: "后端开发" },
+      { id: "134", name: "算法" },
+      { id: "135", name: "数据开发" },
+      { id: "136", name: "测试" },
+      { id: "137", name: "运维" },
+      { id: "138", name: "安全" },
+      { id: "139", name: "客户端开发" },
+      { id: "140", name: "系统架构" },
+      { id: "141", name: "质量保证" },
+      { id: "142", name: "技术管理" },
+      { id: "176", name: "数据分析" },
+      { id: "407", name: "信息安全" },
+      { id: "408", name: "大数据" },
+      { id: "409", name: "机器学习" },
+      { id: "410", name: "综合技术" },
+      { id: "411", name: "解决方案" },
+      { id: "511", name: "地图技术" },
+      { id: "702", name: "基础平台" },
+      { id: "703", name: "无线开发" },
+      { id: "704", name: "综合研发" },
+      { id: "764", name: "多媒体技术" },
+      { id: "769", name: "游戏技术" },
+      { id: "798", name: "芯片" },
+      { id: "811", name: "大模型" },
+      { id: "100000037", name: "智能引擎" },
+      { id: "100000053", name: "风控技术" },
+      { id: "101300002", name: "区块链" },
+      { id: "101300003", name: "云原生" },
+      { id: "101300004", name: "数据库" },
+      { id: "101300005", name: "中间件" },
+      { id: "101300006", name: "IoT" },
+      { id: "101300025", name: "隐私计算" },
+      { id: "101300034", name: "数字化" },
+    ],
+  },
+  {
+    id: "97",
+    name: "产品",
+    subCategories: [
+      { id: "403", name: "平台型" },
+      { id: "404", name: "商业型" },
+      { id: "405", name: "用户型" },
+      { id: "406", name: "综合管理" },
+    ],
+  },
+  {
+    id: "103",
+    name: "运营",
+    subCategories: [
+      { id: "108", name: "商家运营" },
+      { id: "474", name: "安全运营" },
+      { id: "475", name: "产品运营" },
+      { id: "476", name: "规则管理" },
+      { id: "477", name: "行业运营" },
+      { id: "478", name: "内容运营" },
+      { id: "479", name: "频道/类目运营" },
+      { id: "480", name: "无线产品运营" },
+      { id: "481", name: "无线内容运营" },
+      { id: "482", name: "无线运营综合" },
+      { id: "483", name: "运营综合" },
+      { id: "484", name: "综合管理" },
+      { id: "757", name: "用户运营" },
+      { id: "758", name: "产品运营（商业化）" },
+      { id: "834", name: "经营管理" },
+    ],
+  },
+  {
+    id: "112",
+    name: "设计",
+    subCategories: [
+      { id: "113", name: "交互设计" },
+      { id: "114", name: "视觉设计" },
+      { id: "115", name: "用户体验与研究" },
+      { id: "444", name: "综合管理" },
+      { id: "802", name: "创意设计" },
+    ],
+  },
+  {
+    id: "143",
+    name: "风险策略",
+    subCategories: [
+      { id: "446", name: "风险策略分析" },
+      { id: "447", name: "反洗钱" },
+      { id: "448", name: "合规风控" },
+    ],
+  },
+  {
+    id: "157",
+    name: "综合",
+    subCategories: [
+      { id: "159", name: "法务" },
+      { id: "162", name: "人力资源" },
+      { id: "163", name: "行政" },
+      { id: "165", name: "采购" },
+      { id: "168", name: "综合管理" },
+      { id: "180", name: "其它" },
+      { id: "485", name: "IT" },
+      { id: "486", name: "财务及内控" },
+      { id: "487", name: "工程建设" },
+      { id: "488", name: "公司事务" },
+      { id: "489", name: "培训" },
+      { id: "490", name: "物流" },
+    ],
+  },
+];
+
 // ==================== 汇总导出 ====================
 
 /** 各数据源分类映射：sourceId → categories */
@@ -335,6 +459,7 @@ export const SOURCE_CATEGORIES: Record<string, JobCategory[]> = {
   bytedance: BYTEDANCE_CATEGORIES,
   tencent: TENCENT_CATEGORIES,
   alibaba: ALIBABA_CATEGORIES,
+  antgroup: ANTGROUP_CATEGORIES,
 };
 
 /**
@@ -346,6 +471,7 @@ export function getDefaultCategoryConfig(): Record<string, string[]> {
     bytedance: BYTEDANCE_CATEGORIES[0].subCategories.map((s) => s.id), // 研发 → 全部子分类
     tencent: TENCENT_CATEGORIES[0].subCategories.map((s) => s.id),     // 技术 → 全部子分类
     alibaba: ALIBABA_CATEGORIES[0].subCategories.map((s) => s.id),     // 技术 → 全部子分类
+    antgroup: ANTGROUP_CATEGORIES[0].subCategories.map((s) => s.id),   // 技术 → 全部子分类
   };
 }
 

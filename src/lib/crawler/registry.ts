@@ -11,6 +11,7 @@ import { CrawlerSource } from "@/types";
 import { BytedanceCrawler } from "./sources/bytedance";
 import { TencentCrawler } from "./sources/tencent";
 import { AlibabaCrawler } from "./sources/alibaba";
+import { AntgroupCrawler } from "./sources/antgroup";
 
 /** 爬虫实例注册表 */
 const crawlerRegistry: Map<string, BaseCrawler> = new Map();
@@ -21,6 +22,7 @@ function registerAllCrawlers(): void {
     new BytedanceCrawler(),
     new TencentCrawler(),
     new AlibabaCrawler(),
+    new AntgroupCrawler(),
     // === 新增数据源在此处添加 ===
     // new XiaomiCrawler(),
     // new MeituanCrawler(),
