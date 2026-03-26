@@ -191,7 +191,7 @@ export class MeituanCrawler extends BaseCrawler {
       cityList: [],
       department: [],
       jfJgList,
-      jobType: [{ code: "3", subCode: [] }], // 3 = 社招
+      jobType: [{ code: this.recruitType === "campus" ? "1" : "3", subCode: [] }],
       typeCode: [],
       specialCode: [],
     };
@@ -318,6 +318,7 @@ export class MeituanCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 

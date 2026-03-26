@@ -1,3 +1,8 @@
+// ==================== 招聘类型 ====================
+
+/** 招聘类型：社招 | 校招 */
+export type RecruitType = "social" | "campus";
+
 // ==================== 职位相关类型 ====================
 
 /** 职位信息 */
@@ -26,6 +31,8 @@ export interface JobPosting {
   category?: string;
   /** 薪资范围 */
   salary?: string;
+  /** 招聘类型：社招 | 校招 */
+  recruitType: RecruitType;
 }
 
 /** 爬虫数据源配置 */
@@ -146,6 +153,8 @@ export interface CrawlRequest {
   maxJobs?: number;
   /** 每个数据源选中的分类 ID */
   categoryConfig?: CategoryConfig;
+  /** 招聘类型：社招 | 校招 */
+  recruitType?: RecruitType;
 }
 
 /** 匹配请求参数 */

@@ -355,6 +355,7 @@ export class AntgroupCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 
@@ -558,7 +559,8 @@ export class AntgroupCrawler extends BaseCrawler {
     }
 
     // 取消 route 拦截后再关闭 page，避免前端残留请求在关闭后触发 route.fetch 报错
-    await page.unroute("**/api/social/position/search**");
+    const unrouteApiPath = this.recruitType === "campus" ? "campus" : "social";
+    await page.unroute(`**/api/${unrouteApiPath}/position/search**`);
     await page.close();
 
     console.log(

@@ -2,15 +2,19 @@
 
 import { useCallback } from "react";
 import { Tabs } from "@heroui/react";
-import { Bot, Briefcase, Brain, Sparkles } from "lucide-react";
+import { Bot, Briefcase, Brain, Sparkles, GraduationCap, Building2 } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
+import { useAppStore } from "@/stores/app-store";
 import CrawlerPanel from "@/components/CrawlerPanel";
 import JobList from "@/components/JobList";
 import ResumeMatch from "@/components/ResumeMatch";
 import type { Key } from "react";
+import type { RecruitType } from "@/types";
 
 export default function HomePage() {
   const triggerRefresh = useJobStore((s) => s.triggerRefresh);
+  const recruitType = useAppStore((s) => s.recruitType);
+  const setRecruitType = useAppStore((s) => s.setRecruitType);
 
   const handleSelectionChange = useCallback(
     (key: Key) => {
@@ -21,17 +25,53 @@ export default function HomePage() {
     [triggerRefresh]
   );
 
+  const handleRecruitTypeChange = useCallback(
+    (type: RecruitType) => {
+      setRecruitType(type);
+      triggerRefresh();
+    },
+    [setRecruitType, triggerRefresh]
+  );
+
   return (
     <main className="flex-1">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center">
-              <Sparkles className="h-6 w-6 text-primary-foreground" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center">
+                <Sparkles className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight">JobMatcher</h1>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">JobMatcher</h1>
+
+            {/* 社招/校招切换 */}
+            <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-muted/30 p-1">
+              <button
+                onClick={() => handleRecruitTypeChange("social")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
+                  recruitType === "social"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                <span>社招</span>
+              </button>
+              <button
+                onClick={() => handleRecruitTypeChange("campus")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
+                  recruitType === "campus"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <GraduationCap className="h-3.5 w-3.5" />
+                <span>校招</span>
+              </button>
             </div>
           </div>
         </div>

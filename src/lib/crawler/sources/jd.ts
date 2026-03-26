@@ -238,7 +238,7 @@ export class JDCrawler extends BaseCrawler {
       source: this.source.id,
       company: this.source.company,
       sourceId: String(post.requirementId),
-      detailUrl: `${this.source.baseUrl}/web/job/job_info_list/3`,
+      detailUrl: `${this.source.baseUrl}/web/job/job_info_list/${this.recruitType === "campus" ? "1" : "3"}`,
       location: post.workCity || "未知",
       description: post.workContent || "暂无描述",
       requirements: post.qualification || "暂无要求",
@@ -263,6 +263,7 @@ export class JDCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 

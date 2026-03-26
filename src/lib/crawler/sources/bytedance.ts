@@ -193,7 +193,7 @@ export class BytedanceCrawler extends BaseCrawler {
       location_code_list: [],
       subject_id_list: [],
       recruitment_id_list: [],
-      portal_type: 2,
+      portal_type: this.recruitType === "campus" ? 1 : 2,
       job_function_id_list: [],
       storefront_id_list: [],
       portal_entrance: 1,
@@ -258,6 +258,7 @@ export class BytedanceCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 
@@ -404,7 +405,8 @@ export class BytedanceCrawler extends BaseCrawler {
     }
     const category = categoryParts.join(" - ") || "";
 
-    const detailUrl = `${this.source.baseUrl}/experienced/position/${post.id}/detail`;
+    const pathPrefix = this.recruitType === "campus" ? "campus" : "experienced";
+    const detailUrl = `${this.source.baseUrl}/${pathPrefix}/position/${post.id}/detail`;
 
     return {
       id: `${this.source.id}_${post.id}`,

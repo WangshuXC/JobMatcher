@@ -7,7 +7,7 @@
  * 3. 在 registry.ts 中注册
  */
 import { chromium, Browser, Page, BrowserContext } from "playwright";
-import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus } from "@/types";
+import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus, RecruitType } from "@/types";
 
 /** 并行抓取的默认并发数 */
 const DEFAULT_CONCURRENCY = 20;
@@ -15,6 +15,9 @@ const DEFAULT_CONCURRENCY = 20;
 export abstract class BaseCrawler {
   protected browser: Browser | null = null;
   protected context: BrowserContext | null = null;
+
+  /** 当前招聘类型（由 crawl() 方法设置，子类在构建请求时读取） */
+  protected recruitType: RecruitType = "social";
 
   /**
    * 可选的批次回调 — 每当一批职位抓取完成时调用
@@ -188,13 +191,16 @@ export abstract class BaseCrawler {
    * @param concurrency - 详情并行抓取并发数
    * @param selectedCategoryIds - 用户选中的大类 ID 列表（可选，undefined 表示使用默认）
    * @param keyword - 搜索关键词（可选）
+   * @param recruitType - 招聘类型：社招 | 校招（默认社招）
    */
   async crawl(
     maxJobs: number = 0,
     concurrency: number = DEFAULT_CONCURRENCY,
     selectedCategoryIds?: string[],
-    keyword?: string
+    keyword?: string,
+    recruitType: RecruitType = "social"
   ): Promise<CrawlResult> {
+    this.recruitType = recruitType;
     const startTime = Date.now();
     let status: CrawlerStatus = "running";
     let jobs: JobPosting[] = [];

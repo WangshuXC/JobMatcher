@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { jobStore } from "@/lib/store";
-import { JobPosting } from "@/types";
+import { JobPosting, RecruitType } from "@/types";
 import {
   isChinaLocation,
   getProvince,
@@ -128,19 +128,20 @@ export async function GET(req: NextRequest) {
   const source = searchParams.get("source");
   const keyword = searchParams.get("keyword");
   const locationParam = searchParams.get("location"); // 逗号分隔的多选
+  const recruitType = (searchParams.get("recruitType") || "social") as RecruitType;
 
   // --- 第一步：按 source + keyword 得到基础结果 ---
   let baseJobs;
 
   if (keyword) {
-    baseJobs = jobStore.search(keyword);
+    baseJobs = jobStore.search(keyword, recruitType);
     if (source) {
       baseJobs = baseJobs.filter((j) => j.source === source);
     }
   } else if (source) {
-    baseJobs = jobStore.getBySource(source);
+    baseJobs = jobStore.getBySource(source, recruitType);
   } else {
-    baseJobs = jobStore.getAll();
+    baseJobs = jobStore.getAll(recruitType);
   }
 
   // --- 第二步：从 baseJobs 中提取地点列表（拆分归一化后去重计数） ---
@@ -165,9 +166,9 @@ export async function GET(req: NextRequest) {
   // --- 第四步：从最终 jobs 中动态计算各数据源数量 ---
   let jobsForSourceCount;
   if (keyword) {
-    jobsForSourceCount = jobStore.search(keyword);
+    jobsForSourceCount = jobStore.search(keyword, recruitType);
   } else {
-    jobsForSourceCount = jobStore.getAll();
+    jobsForSourceCount = jobStore.getAll(recruitType);
   }
   if (selectedLocs && selectedLocs.size > 0) {
     jobsForSourceCount = jobsForSourceCount.filter((j) =>

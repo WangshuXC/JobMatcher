@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from "react";
 import { useCrawlerStore } from "@/stores/crawler-store";
 import { useJobStore } from "@/stores/job-store";
+import { useAppStore } from "@/stores/app-store";
 import { CrawlerSource } from "@/types";
 
 /**
@@ -28,6 +29,7 @@ export function useCrawl() {
   } = useCrawlerStore();
 
   const triggerRefresh = useJobStore((s) => s.triggerRefresh);
+  const recruitType = useAppStore((s) => s.recruitType);
 
   // 加载数据源
   useEffect(() => {
@@ -55,7 +57,7 @@ export function useCrawl() {
       const response = await fetch("/api/crawl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sources: selectedSources, maxJobs, categoryConfig, keywordConfig }),
+        body: JSON.stringify({ sources: selectedSources, maxJobs, categoryConfig, keywordConfig, recruitType }),
       });
 
       if (!response.ok || !response.body) {
@@ -147,6 +149,7 @@ export function useCrawl() {
     maxJobs,
     categoryConfig,
     keywordConfig,
+    recruitType,
     setIsRunning,
     resetCrawlState,
     initSourceProgress,

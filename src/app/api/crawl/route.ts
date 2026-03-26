@@ -13,17 +13,18 @@
 import { NextRequest } from "next/server";
 import { getCrawler } from "@/lib/crawler/registry";
 import { jobStore } from "@/lib/store";
-import { JobPosting, CategoryConfig } from "@/types";
+import { JobPosting, CategoryConfig, RecruitType } from "@/types";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sources, maxJobs = 0, categoryConfig, keywordConfig } = body as {
+  const { sources, maxJobs = 0, categoryConfig, keywordConfig, recruitType = "social" as RecruitType } = body as {
     sources: string[];
     maxJobs?: number;
     categoryConfig?: CategoryConfig;
     keywordConfig?: Record<string, string>;
+    recruitType?: RecruitType;
   };
 
   if (!sources || sources.length === 0) {
@@ -77,19 +78,19 @@ export async function POST(req: NextRequest) {
 
           // 设置增量回调：每批职位完成后立即存储 + 推送
           crawler.onJobsBatch = (jobs: JobPosting[]) => {
-            // 增量存储到 jobStore（upsertMany 按 source_sourceId 去重）
+            // 增量存储到 jobStore（upsertMany 按 recruitType_source_sourceId 去重）
             jobStore.upsertMany(jobs);
 
             // 推送这批新数据到前端
             send("jobs", {
               source: sourceId,
               jobs,
-              totalJobs: jobStore.count(),
-              countBySource: jobStore.countBySource(),
+              totalJobs: jobStore.count(recruitType),
+              countBySource: jobStore.countBySource(recruitType),
             });
           };
 
-          const result = await crawler.crawl(maxJobs, undefined, categoryConfig?.[sourceId], keywordConfig?.[sourceId]);
+          const result = await crawler.crawl(maxJobs, undefined, categoryConfig?.[sourceId], keywordConfig?.[sourceId], recruitType);
 
           // 如果有些 jobs 没有通过 onJobsBatch 推送过（比如老爬虫没设置回调的情况），
           // 在这里补充存储
@@ -108,8 +109,8 @@ export async function POST(req: NextRequest) {
 
         // 全部完成
         send("done", {
-          totalJobs: jobStore.count(),
-          countBySource: jobStore.countBySource(),
+          totalJobs: jobStore.count(recruitType),
+          countBySource: jobStore.countBySource(recruitType),
         });
       } catch (err) {
         send("error", {

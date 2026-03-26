@@ -3,15 +3,21 @@
  *
  * - 启动时自动从 data/jobs.json 加载已有数据
  * - 每次写入操作（upsert / clear）后自动同步到文件
- * - 对外 API 接口与原来完全一致，调用方无需修改
+ * - 支持按 recruitType（社招/校招）筛选数据
+ * - 旧数据兼容：无 recruitType 字段的数据自动标记为 "social"
  */
-import { JobPosting } from "@/types";
+import { JobPosting, RecruitType } from "@/types";
 import fs from "fs";
 import path from "path";
 
 /** 数据文件路径：项目根目录 data/jobs.json */
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "jobs.json");
+
+/** 生成存储 key：recruitType_source_sourceId */
+function makeKey(job: JobPosting): string {
+  return `${job.recruitType || "social"}_${job.source}_${job.sourceId}`;
+}
 
 class JobStore {
   private jobs: Map<string, JobPosting> = new Map();
@@ -34,7 +40,11 @@ class JobStore {
         const raw = fs.readFileSync(DATA_FILE, "utf-8");
         const arr: JobPosting[] = JSON.parse(raw);
         for (const job of arr) {
-          const key = `${job.source}_${job.sourceId}`;
+          // 旧数据兼容：无 recruitType 字段的数据自动标记为 "social"
+          if (!job.recruitType) {
+            job.recruitType = "social";
+          }
+          const key = makeKey(job);
           this.jobs.set(key, job);
         }
         console.log(`[JobStore] 从文件加载了 ${arr.length} 个职位`);
@@ -55,10 +65,16 @@ class JobStore {
     }
   }
 
+  /** 按 recruitType 过滤的内部辅助方法 */
+  private filterByRecruitType(jobs: JobPosting[], recruitType?: RecruitType): JobPosting[] {
+    if (!recruitType) return jobs;
+    return jobs.filter((j) => (j.recruitType || "social") === recruitType);
+  }
+
   /** 添加或更新职位 */
   upsert(job: JobPosting): void {
     this.loadFromFile();
-    const key = `${job.source}_${job.sourceId}`;
+    const key = makeKey(job);
     this.jobs.set(key, job);
     this.saveToFile();
   }
@@ -67,27 +83,28 @@ class JobStore {
   upsertMany(jobs: JobPosting[]): void {
     this.loadFromFile();
     for (const job of jobs) {
-      const key = `${job.source}_${job.sourceId}`;
+      const key = makeKey(job);
       this.jobs.set(key, job);
     }
     this.saveToFile();
   }
 
-  /** 获取所有职位 */
-  getAll(): JobPosting[] {
+  /** 获取所有职位（可选按 recruitType 筛选） */
+  getAll(recruitType?: RecruitType): JobPosting[] {
     this.loadFromFile();
-    return Array.from(this.jobs.values());
+    const all = Array.from(this.jobs.values());
+    return this.filterByRecruitType(all, recruitType);
   }
 
-  /** 按数据源筛选 */
-  getBySource(source: string): JobPosting[] {
-    return this.getAll().filter((j) => j.source === source);
+  /** 按数据源筛选（可选按 recruitType 筛选） */
+  getBySource(source: string, recruitType?: RecruitType): JobPosting[] {
+    return this.getAll(recruitType).filter((j) => j.source === source);
   }
 
-  /** 搜索职位 */
-  search(keyword: string): JobPosting[] {
+  /** 搜索职位（可选按 recruitType 筛选） */
+  search(keyword: string, recruitType?: RecruitType): JobPosting[] {
     const kw = keyword.toLowerCase();
-    return this.getAll().filter(
+    return this.getAll(recruitType).filter(
       (j) =>
         j.title.toLowerCase().includes(kw) ||
         j.description.toLowerCase().includes(kw) ||
@@ -96,38 +113,39 @@ class JobStore {
     );
   }
 
-  /** 获取职位总数 */
-  count(): number {
-    this.loadFromFile();
-    return this.jobs.size;
+  /** 获取职位总数（可选按 recruitType 筛选） */
+  count(recruitType?: RecruitType): number {
+    return this.getAll(recruitType).length;
   }
 
-  /** 按数据源统计 */
-  countBySource(): Record<string, number> {
-    this.loadFromFile();
+  /** 按数据源统计（可选按 recruitType 筛选） */
+  countBySource(recruitType?: RecruitType): Record<string, number> {
+    const jobs = this.getAll(recruitType);
     const counts: Record<string, number> = {};
-    for (const job of this.jobs.values()) {
+    for (const job of jobs) {
       counts[job.source] = (counts[job.source] || 0) + 1;
     }
     return counts;
   }
 
-  /** 清除指定数据源的数据 */
-  clearSource(source: string): void {
+  /** 清除指定数据源的数据（可选按 recruitType 筛选） */
+  clearSource(source: string, recruitType?: RecruitType): void {
     this.loadFromFile();
     for (const [key, job] of this.jobs.entries()) {
       if (job.source === source) {
-        this.jobs.delete(key);
+        if (!recruitType || (job.recruitType || "social") === recruitType) {
+          this.jobs.delete(key);
+        }
       }
     }
     this.saveToFile();
   }
 
-  /** 获取所有去重的地点列表（按数量降序，自动拆分复合地点） */
-  getLocations(): string[] {
-    this.loadFromFile();
+  /** 获取所有去重的地点列表（按数量降序，自动拆分复合地点，可选按 recruitType 筛选） */
+  getLocations(recruitType?: RecruitType): string[] {
+    const jobs = this.getAll(recruitType);
     const counts: Record<string, number> = {};
-    for (const job of this.jobs.values()) {
+    for (const job of jobs) {
       const parts = (job.location || "")
         .split(/[、，,/／]/)
         .map((s) => s.trim())

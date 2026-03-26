@@ -108,7 +108,7 @@ export class TencentCrawler extends BaseCrawler {
 
   /**
    * 构建 API 查询 URL
-   * attrId=1 表示社会招聘
+   * attrId=1 表示社会招聘，attrId=2 表示校园招聘
    */
   private buildApiUrl(
     pageIndex: number,
@@ -117,7 +117,8 @@ export class TencentCrawler extends BaseCrawler {
   ): string {
     const timestamp = Date.now();
     const encodedKeyword = encodeURIComponent(keyword);
-    return `${this.source.baseUrl}/tencentcareer/api/post/Query?timestamp=${timestamp}&countryId=&cityId=&bgIds=&productId=&categoryId=${categoryIds.join(",")}&parentCategoryId=&attrId=1&keyword=${encodedKeyword}&pageIndex=${pageIndex}&pageSize=${PAGE_SIZE}&language=zh-cn&area=cn`;
+    const attrId = this.recruitType === "campus" ? 2 : 1;
+    return `${this.source.baseUrl}/tencentcareer/api/post/Query?timestamp=${timestamp}&countryId=&cityId=&bgIds=&productId=&categoryId=${categoryIds.join(",")}&parentCategoryId=&attrId=${attrId}&keyword=${encodedKeyword}&pageIndex=${pageIndex}&pageSize=${PAGE_SIZE}&language=zh-cn&area=cn`;
   }
 
   /**
@@ -402,6 +403,7 @@ export class TencentCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 

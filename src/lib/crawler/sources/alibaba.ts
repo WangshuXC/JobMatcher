@@ -393,6 +393,7 @@ export class AlibabaCrawler extends BaseCrawler {
       detailUrl: partial.detailUrl || "",
       crawledAt: partial.crawledAt || new Date().toISOString(),
       category: partial.category,
+      recruitType: this.recruitType,
     };
   }
 
@@ -464,7 +465,8 @@ export class AlibabaCrawler extends BaseCrawler {
         try {
           // 每个子站创建独立 page，建立 session + CSRF
           const page = await this.newPage();
-          const url = `${subsite.domain}${subsite.listPath}`;
+          const typeParam = this.recruitType === "campus" ? "campus" : "experienced";
+          const url = `${subsite.domain}/off-campus/position-list?lang=zh&type=${typeParam}`;
           console.log(`[阿里巴巴] 初始化子站 ${subsite.name}: ${url}`);
           await this.safeGoto(page, url);
           await this.randomDelay(1000, 2000);

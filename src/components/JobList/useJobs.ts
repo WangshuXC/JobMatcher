@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import { useJobStore } from "@/stores/job-store";
+import { useAppStore } from "@/stores/app-store";
 
 /**
  * JobList 业务逻辑 hook
@@ -21,11 +22,13 @@ export function useJobs() {
     clearAll,
   } = useJobStore();
 
+  const recruitType = useAppStore((s) => s.recruitType);
+
   // 用 ref 保存当前筛选条件，以便 refreshTrigger 触发时能读取最新值
-  const filtersRef = useRef({ source: selectedSource, keyword, locations: selectedLocations });
+  const filtersRef = useRef({ source: selectedSource, keyword, locations: selectedLocations, recruitType });
   useEffect(() => {
-    filtersRef.current = { source: selectedSource, keyword, locations: selectedLocations };
-  }, [selectedSource, keyword, selectedLocations]);
+    filtersRef.current = { source: selectedSource, keyword, locations: selectedLocations, recruitType };
+  }, [selectedSource, keyword, selectedLocations, recruitType]);
 
   /** 通用请求函数 */
   const fetchJobs = useCallback(
@@ -34,6 +37,7 @@ export function useJobs() {
       if (source) params.set("source", source);
       if (kw) params.set("keyword", kw);
       if (locations.length > 0) params.set("location", locations.join(","));
+      params.set("recruitType", filtersRef.current.recruitType);
 
       const response = await fetch(`/api/jobs?${params.toString()}`);
       const data = await response.json();
@@ -54,11 +58,12 @@ export function useJobs() {
 
     const loadJobs = async () => {
       setInitialLoading(true);
-      const { source, keyword: kw, locations } = filtersRef.current;
+      const { source, keyword: kw, locations, recruitType: rt } = filtersRef.current;
       const params = new URLSearchParams();
       if (source) params.set("source", source);
       if (kw) params.set("keyword", kw);
       if (locations.length > 0) params.set("location", locations.join(","));
+      params.set("recruitType", rt);
 
       try {
         const response = await fetch(`/api/jobs?${params.toString()}`);
@@ -79,7 +84,7 @@ export function useJobs() {
     return () => {
       cancelled = true;
     };
-  }, [refreshTrigger, setInitialLoading, setJobData]);
+  }, [refreshTrigger, recruitType, setInitialLoading, setJobData]);
 
   /** 搜索 */
   const handleSearch = useCallback(() => {
