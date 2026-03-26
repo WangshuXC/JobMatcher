@@ -6,11 +6,12 @@ import SourceSelector from "./SourceSelector";
 import MaxJobsControl from "./MaxJobsControl";
 import CrawlButton from "./CrawlButton";
 import CrawlProgress from "./CrawlProgress";
-import CrawlResults from "./CrawlResults";
 import { useCrawl } from "./useCrawl";
+import { useCrawlerStore } from "@/stores/crawler-store";
 
 export default function CrawlerPanel() {
   const { startCrawl } = useCrawl();
+  const isRunning = useCrawlerStore((s) => s.isRunning);
 
   return (
     <Card className="border-border/50 shadow-lg">
@@ -20,10 +21,13 @@ export default function CrawlerPanel() {
       </CardHeader>
       <CardContent className="space-y-6">
         <SourceSelector />
-        <MaxJobsControl />
-        <CrawlButton onStartCrawl={startCrawl} />
+        {!isRunning && (
+          <>
+            <MaxJobsControl />
+            <CrawlButton onStartCrawl={startCrawl} />
+          </>
+        )}
         <CrawlProgress />
-        <CrawlResults />
       </CardContent>
     </Card>
   );

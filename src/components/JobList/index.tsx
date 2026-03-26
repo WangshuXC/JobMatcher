@@ -54,7 +54,7 @@ export default function JobList() {
                   >
                     <EllipsisVertical className="h-4 w-4 outline-none" />
                   </Dropdown.Trigger>
-                  <Dropdown.Popover>
+                  <Dropdown.Popover className="md:min-w-fit">
                     <Dropdown.Menu
                       onAction={(key) => {
                         if (key === "clear-data") {
@@ -63,7 +63,7 @@ export default function JobList() {
                       }}
                     >
                       <Dropdown.Section>
-                        <Dropdown.Item id="clear-data" className="w-fit" textValue="清除数据" variant="danger">
+                        <Dropdown.Item id="clear-data" textValue="清除数据" variant="danger">
                           <div className="flex h-full items-center gap-2">
                             <Trash2 className="size-4 text-danger" />
                             <Label>清除数据</Label>

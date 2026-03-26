@@ -10,7 +10,7 @@ import { chromium, Browser, Page, BrowserContext } from "playwright";
 import { JobPosting, CrawlerSource, CrawlResult, CrawlerStatus } from "@/types";
 
 /** 并行抓取的默认并发数 */
-const DEFAULT_CONCURRENCY = 5;
+const DEFAULT_CONCURRENCY = 20;
 
 export abstract class BaseCrawler {
   protected browser: Browser | null = null;
@@ -21,6 +21,14 @@ export abstract class BaseCrawler {
    * 用于实时增量存储和推送到前端
    */
   onJobsBatch?: (jobs: JobPosting[]) => void;
+
+  /**
+   * 可选的进度回调 — 报告当前源的抓取进度
+   * @param current - 当前已处理数
+   * @param total - 总数
+   * @param message - 进度描述
+   */
+  onProgress?: (current: number, total: number, message: string) => void;
 
   /** 数据源配置信息 */
   abstract readonly source: CrawlerSource;
@@ -72,13 +80,14 @@ export abstract class BaseCrawler {
 
   /**
    * 抓取职位列表 - 返回基本信息和详情页URL列表
-   * @param page - 浏览器页面
+   *
+   * 子类可通过 `this.newPage()` 创建多个页面实例并行抓取。
+   *
    * @param maxJobs - 最大抓取岗位数量
    * @param selectedCategoryIds - 用户选中的大类 ID 列表（可选，undefined 表示使用默认）
    * @param keyword - 搜索关键词（可选）
    */
   protected abstract crawlJobList(
-    page: Page,
     maxJobs: number,
     selectedCategoryIds?: string[],
     keyword?: string
@@ -115,6 +124,11 @@ export abstract class BaseCrawler {
         `[${this.source.name}] 并行抓取详情 批次 ${batchIndex}/${totalBatches}（每批 ${batch.length} 个）`
       );
 
+      // 报告进度
+      if (this.onProgress) {
+        this.onProgress(i, total, `正在抓取详情 批次 ${batchIndex}/${totalBatches}`);
+      }
+
       // 为每个任务创建独立的 page 并并发执行
       const promises = batch.map(async (partial, idx) => {
         const page = await this.newPage();
@@ -148,6 +162,11 @@ export abstract class BaseCrawler {
       // 每批完成后调用回调，实现增量推送
       if (batchJobs.length > 0 && this.onJobsBatch) {
         this.onJobsBatch(batchJobs);
+      }
+
+      // 报告最新进度
+      if (this.onProgress) {
+        this.onProgress(Math.min(i + concurrency, total), total, `已抓取详情 ${jobs.length}/${total}`);
       }
 
       // 批次间随机延迟防反爬
@@ -197,13 +216,18 @@ export abstract class BaseCrawler {
 
     try {
       await this.launchBrowser();
-      const page = await this.newPage();
 
-      // 第一步：获取职位列表
+      // 第一步：获取职位列表（子类自行管理 page 实例，可并行抓取）
       let partialJobs: Partial<JobPosting>[] = [];
       console.log(`[${this.source.name}] 正在抓取职位列表...`);
+
+      // 报告列表抓取开始
+      if (this.onProgress) {
+        this.onProgress(0, 0, `正在抓取职位列表...`);
+      }
+
       try {
-        partialJobs = await this.crawlJobList(page, effectiveMax, selectedCategoryIds, keyword);
+        partialJobs = await this.crawlJobList(effectiveMax, selectedCategoryIds, keyword);
         console.log(`[${this.source.name}] 发现 ${partialJobs.length} 个职位`);
       } catch (err) {
         // crawlJobList 中途失败：记录错误但不终止，继续处理已获取的列表数据
@@ -212,12 +236,15 @@ export abstract class BaseCrawler {
         console.log(`[${this.source.name}] 已通过增量回调推送 ${pushedJobCount} 个职位`);
       }
 
-      // 关闭列表页
-      await page.close();
-
       // 第二步：并行抓取详情（仅对未通过 onJobsBatch 推送的数据执行）
       if (partialJobs.length > 0) {
         console.log(`[${this.source.name}] 开始并行抓取详情（并发数: ${concurrency}）...`);
+
+        // 报告进入详情抓取阶段
+        if (this.onProgress) {
+          this.onProgress(0, partialJobs.length, `发现 ${partialJobs.length} 个职位，开始抓取详情...`);
+        }
+
         try {
           jobs = await this.crawlDetailsInParallel(partialJobs, concurrency);
         } catch (err) {

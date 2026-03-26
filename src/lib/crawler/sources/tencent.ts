@@ -135,10 +135,11 @@ export class TencentCrawler extends BaseCrawler {
   }
 
   /**
-   * 通过 API 抓取职位列表
+   * 通过 API 并行抓取职位列表
+   *
+   * 策略：先获取第 1 页得到 totalCount，计算总页数后并行请求所有剩余页面。
    */
   protected async crawlJobList(
-    page: Page,
     maxJobs: number,
     selectedCategoryIds?: string[],
     keyword?: string
@@ -159,59 +160,111 @@ export class TencentCrawler extends BaseCrawler {
       searchKeyword = "前端";
     }
 
-    const allJobs: Partial<JobPosting>[] = [];
     const maxPages = Math.ceil(maxJobs / PAGE_SIZE);
 
     // 先访问首页建立 cookie/session
-    await this.safeGoto(page, this.source.baseUrl);
+    const initPage = await this.newPage();
+    await this.safeGoto(initPage, this.source.baseUrl);
     await this.randomDelay(1000, 2000);
 
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      const data = await this.fetchApiData(page, pageNum, searchKeyword, categoryIds);
+    // 第 1 页：获取 totalCount
+    const firstData = await this.fetchApiData(initPage, 1, searchKeyword, categoryIds);
+    await initPage.close();
 
-      if (!data || !data.Data.Posts || data.Data.Posts.length === 0) {
-        console.log(`[腾讯] 第 ${pageNum} 页无数据，停止翻页`);
-        break;
-      }
+    if (!firstData || !firstData.Data.Posts || firstData.Data.Posts.length === 0) {
+      console.log("[腾讯] 第 1 页无数据，终止");
+      return [];
+    }
 
-      console.log(`[腾讯] 第 ${pageNum}/${maxPages} 页获取到 ${data.Data.Posts.length} 个职位`);
+    const totalCount = firstData.Data.Count;
+    const totalPages = Math.min(Math.ceil(totalCount / PAGE_SIZE), maxPages);
+    console.log(`[腾讯] 共 ${totalCount} 个职位，${totalPages} 页（目标 ${maxJobs} 个）`);
 
-      for (const post of data.Data.Posts) {
-        // 判断是否为腾讯内部详情页（SourceID=1）还是外部链接（如 Workday）
-        const isInternal = post.SourceID === 1;
-        const detailUrl = isInternal
-          ? this.buildDetailUrl(post.PostId)
-          : post.PostURL;
-
-        // 事业群信息: BGName + ComName (如果有子公司)
-        const bgInfo = post.ComName
-          ? `${post.BGName} - ${post.ComName}`
-          : post.BGName;
-
-        allJobs.push({
-          title: post.RecruitPostName,
-          source: this.source.id,
-          company: this.source.company,
-          sourceId: post.PostId,
-          detailUrl,
-          location: post.LocationName || "未知",
-          // API 已经提供了职责描述，存入 description
-          description: post.Responsibility?.replace(/\\r\\n|\\n/g, "\n") || "",
-          category: `${bgInfo} | ${post.CategoryName}`,
-        });
-
-        if (allJobs.length >= maxJobs) break;
-      }
-
+    // 解析第 1 页的数据
+    const allJobs: Partial<JobPosting>[] = [];
+    for (const post of firstData.Data.Posts) {
       if (allJobs.length >= maxJobs) break;
+      allJobs.push(this.parsePost(post));
+    }
 
-      // 翻页间延迟
-      if (pageNum < maxPages) {
-        await this.randomDelay(1000, 2000);
+    if (this.onProgress) {
+      this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 第 1/${totalPages} 页`);
+    }
+
+    if (allJobs.length >= maxJobs || totalPages <= 1) {
+      return allJobs.slice(0, maxJobs);
+    }
+
+    // 并行请求剩余页面（每批 LIST_CONCURRENCY 个并发）
+    const LIST_CONCURRENCY = 5;
+    const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+
+    for (let i = 0; i < remainingPages.length && allJobs.length < maxJobs; i += LIST_CONCURRENCY) {
+      const batch = remainingPages.slice(i, i + LIST_CONCURRENCY);
+      const batchNum = Math.floor(i / LIST_CONCURRENCY) + 1;
+      const totalBatches = Math.ceil(remainingPages.length / LIST_CONCURRENCY);
+      console.log(`[腾讯] 并行抓取列表 批次 ${batchNum}/${totalBatches}（页 ${batch[0]}~${batch[batch.length - 1]}）`);
+
+      const promises = batch.map(async (pageNum) => {
+        const page = await this.newPage();
+        try {
+          // 每个 page 需要先访问首页建立 session
+          await this.safeGoto(page, this.source.baseUrl);
+          await this.randomDelay(300, 800);
+          return await this.fetchApiData(page, pageNum, searchKeyword, categoryIds);
+        } catch (err) {
+          console.error(`[腾讯] 第 ${pageNum} 页请求失败:`, err);
+          return null;
+        } finally {
+          await page.close();
+        }
+      });
+
+      const results = await Promise.all(promises);
+
+      for (const data of results) {
+        if (!data?.Data?.Posts) continue;
+        for (const post of data.Data.Posts) {
+          if (allJobs.length >= maxJobs) break;
+          allJobs.push(this.parsePost(post));
+        }
+      }
+
+      if (this.onProgress) {
+        this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 批次 ${batchNum}/${totalBatches}`);
+      }
+
+      // 批次间短延迟
+      if (i + LIST_CONCURRENCY < remainingPages.length && allJobs.length < maxJobs) {
+        await this.randomDelay(500, 1000);
       }
     }
 
     return allJobs.slice(0, maxJobs);
+  }
+
+  /**
+   * 解析单条 API 返回的职位数据
+   */
+  private parsePost(post: TencentApiPost): Partial<JobPosting> {
+    const isInternal = post.SourceID === 1;
+    const detailUrl = isInternal
+      ? this.buildDetailUrl(post.PostId)
+      : post.PostURL;
+    const bgInfo = post.ComName
+      ? `${post.BGName} - ${post.ComName}`
+      : post.BGName;
+
+    return {
+      title: post.RecruitPostName,
+      source: this.source.id,
+      company: this.source.company,
+      sourceId: post.PostId,
+      detailUrl,
+      location: post.LocationName || "未知",
+      description: post.Responsibility?.replace(/\\r\\n|\\n/g, "\n") || "",
+      category: `${bgInfo} | ${post.CategoryName}`,
+    };
   }
 
   /**

@@ -23,6 +23,8 @@ export function useCrawl() {
     setCrawledCount,
     addResult,
     resetCrawlState,
+    updateSourceProgress,
+    initSourceProgress,
   } = useCrawlerStore();
 
   const triggerRefresh = useJobStore((s) => s.triggerRefresh);
@@ -46,6 +48,7 @@ export function useCrawl() {
 
     setIsRunning(true);
     resetCrawlState();
+    initSourceProgress(selectedSources);
     setProgressMsg("正在启动爬虫...");
 
     try {
@@ -90,9 +93,21 @@ export function useCrawl() {
           switch (eventType) {
             case "progress":
               setProgressMsg(eventData.message || "");
+              updateSourceProgress(eventData.source, {
+                status: "running",
+                current: eventData.current ?? 0,
+                total: eventData.total ?? 0,
+                message: eventData.message || "",
+              });
               break;
             case "jobs":
               setCrawledCount(eventData.totalJobs || 0);
+              // 更新对应源的入库数
+              if (eventData.countBySource && eventData.source) {
+                updateSourceProgress(eventData.source, {
+                  jobCount: eventData.countBySource[eventData.source] || 0,
+                });
+              }
               triggerRefresh();
               break;
             case "result":
@@ -102,6 +117,12 @@ export function useCrawl() {
                 jobCount: eventData.jobCount,
                 message: eventData.message,
                 duration: eventData.duration,
+              });
+              updateSourceProgress(eventData.source, {
+                status: eventData.status === "error" ? "error" : "completed",
+                jobCount: eventData.jobCount || 0,
+                duration: eventData.duration,
+                message: eventData.message || "",
               });
               setProgressMsg("");
               break;
@@ -128,9 +149,11 @@ export function useCrawl() {
     keywordConfig,
     setIsRunning,
     resetCrawlState,
+    initSourceProgress,
     setProgressMsg,
     setCrawledCount,
     addResult,
+    updateSourceProgress,
     triggerRefresh,
   ]);
 

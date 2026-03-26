@@ -58,72 +58,79 @@ export default function SourceConfigDrawer({
     onClose();
   };
 
+  /**
+   * 获取某个大类下所有可选 ID：
+   * - 有子分类 → 子分类 ID 列表
+   * - 无子分类 → 大类自身 ID（作为叶子节点直接选中）
+   */
+  const getSelectableIds = useCallback((cat: JobCategory): string[] => {
+    return cat.subCategories.length > 0
+      ? cat.subCategories.map((s) => s.id)
+      : [cat.id];
+  }, []);
+
   /** 切换大类下所有子分类的 CheckboxGroup onChange */
   const handleSubCategoryChange = useCallback(
     (sid: string, category: JobCategory, newSelected: string[]) => {
       setDraft((prev) => {
         const current = prev[sid] || [];
-        const subIds = new Set(category.subCategories.map((s) => s.id));
+        const subIds = new Set(getSelectableIds(category));
         const withoutThisCategory = current.filter((id) => !subIds.has(id));
         const next = [...withoutThisCategory, ...newSelected];
         return { ...prev, [sid]: next };
       });
     },
-    []
+    [getSelectableIds]
   );
 
-  /** 切换大类（全选/全不选该大类下的所有子分类） */
+  /** 切换大类（全选/全不选该大类下的所有子分类，或切换无子分类的大类本身） */
   const toggleCategory = useCallback(
     (sid: string, category: JobCategory, isSelected: boolean) => {
       setDraft((prev) => {
         const current = prev[sid] || [];
-        const subIds = category.subCategories.map((s) => s.id);
+        const ids = getSelectableIds(category);
         let next: string[];
         if (isSelected) {
           const currentSet = new Set(current);
-          for (const id of subIds) {
+          for (const id of ids) {
             currentSet.add(id);
           }
           next = Array.from(currentSet);
         } else {
-          next = current.filter((id) => !subIds.includes(id));
+          const idsSet = new Set(ids);
+          next = current.filter((id) => !idsSet.has(id));
         }
         return { ...prev, [sid]: next };
       });
     },
-    []
+    [getSelectableIds]
   );
 
-  /** 全选某个数据源的所有子分类 */
+  /** 全选某个数据源的所有可选 ID */
   const selectAllSource = useCallback((sid: string) => {
     const categories = SOURCE_CATEGORIES[sid] || [];
-    const allSubIds = categories.flatMap((c) =>
-      c.subCategories.map((s) => s.id)
-    );
-    setDraft((prev) => ({ ...prev, [sid]: allSubIds }));
-  }, []);
+    const allIds = categories.flatMap((c) => getSelectableIds(c));
+    setDraft((prev) => ({ ...prev, [sid]: allIds }));
+  }, [getSelectableIds]);
 
   /** 清空某个数据源的所有选择 */
   const clearAllSource = useCallback((sid: string) => {
     setDraft((prev) => ({ ...prev, [sid]: [] }));
   }, []);
 
-  /** 获取大类下选中的子分类 ID 列表 */
+  /** 获取大类下选中的可选 ID 列表 */
   const getSelectedSubIds = (sid: string, category: JobCategory): string[] => {
     const selected = new Set(draft[sid] || []);
-    return category.subCategories
-      .map((s) => s.id)
-      .filter((id) => selected.has(id));
+    return getSelectableIds(category).filter((id) => selected.has(id));
   };
 
   // 当前数据源的分类数据
   const categories = sourceId ? SOURCE_CATEGORIES[sourceId] || [] : [];
   const selected = sourceId ? draft[sourceId] || [] : [];
-  const allSubIds = categories.flatMap((c) =>
-    c.subCategories.map((s) => s.id)
-  );
+  const allSelectableIds = categories.flatMap((c) => getSelectableIds(c));
   const allSelected =
-    allSubIds.length > 0 && allSubIds.every((id) => selected.includes(id));
+    allSelectableIds.length > 0 &&
+    allSelectableIds.every((id) => selected.includes(id));
 
   return (
     <Drawer.Backdrop
@@ -154,7 +161,7 @@ export default function SourceConfigDrawer({
                 {/* 全选/清空 + 统计 */}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
-                    已选 {selected.length} 个子分类
+                    已选 {selected.length} 个分类
                   </span>
                   <button
                     type="button"
@@ -199,12 +206,39 @@ export default function SourceConfigDrawer({
                 >
                   {categories.map((cat) => {
                     const hasSubCategories = cat.subCategories.length > 0;
+                    const selectableIds = getSelectableIds(cat);
                     const selectedSubIds = getSelectedSubIds(sourceId, cat);
                     const allSubSelected =
-                      hasSubCategories &&
-                      selectedSubIds.length === cat.subCategories.length;
+                      selectableIds.length > 0 &&
+                      selectedSubIds.length === selectableIds.length;
                     const someSubSelected =
                       selectedSubIds.length > 0 && !allSubSelected;
+
+                    // 无子分类的大类：直接作为叶子节点，不展开折叠
+                    if (!hasSubCategories) {
+                      return (
+                        <div
+                          key={cat.id}
+                          className="flex items-center gap-2 py-2 rounded-lg"
+                        >
+                          <Checkbox
+                            isSelected={allSubSelected}
+                            onChange={(isSelected: boolean) =>
+                              toggleCategory(sourceId, cat, isSelected)
+                            }
+                          >
+                            <Checkbox.Control>
+                              <Checkbox.Indicator />
+                            </Checkbox.Control>
+                            <Checkbox.Content>
+                              <Label className="text-xs font-medium cursor-pointer text-primary">
+                                {cat.name}
+                              </Label>
+                            </Checkbox.Content>
+                          </Checkbox>
+                        </div>
+                      );
+                    }
 
                     return (
                       <Disclosure
@@ -217,7 +251,6 @@ export default function SourceConfigDrawer({
                           <Checkbox
                             isIndeterminate={someSubSelected}
                             isSelected={allSubSelected}
-                            isDisabled={!hasSubCategories}
                             onChange={(isSelected: boolean) =>
                               toggleCategory(sourceId, cat, isSelected)
                             }
@@ -231,12 +264,10 @@ export default function SourceConfigDrawer({
                             <Disclosure.Trigger className="flex items-center justify-between w-full text-left text-xs font-medium cursor-pointer select-none py-0.5 text-primary transition-colors">
                               <span>
                                 {cat.name}
-                                {hasSubCategories && (
-                                  <span className="text-muted-foreground font-normal ml-1">
-                                    ({selectedSubIds.length}/
-                                    {cat.subCategories.length})
-                                  </span>
-                                )}
+                                <span className="text-muted-foreground font-normal ml-1">
+                                  ({selectedSubIds.length}/
+                                  {cat.subCategories.length})
+                                </span>
                               </span>
                               <Disclosure.Indicator className="transition-transform duration-200" />
                             </Disclosure.Trigger>
@@ -244,36 +275,34 @@ export default function SourceConfigDrawer({
                         </div>
 
                         {/* 子分类列表 - 展开内容 */}
-                        {hasSubCategories && (
-                          <Disclosure.Content>
-                            <Disclosure.Body className="px-3 pb-3">
-                              <CheckboxGroup
-                                value={selectedSubIds}
-                                onChange={(newValues: string[]) =>
-                                  handleSubCategoryChange(
-                                    sourceId,
-                                    cat,
-                                    newValues
-                                  )
-                                }
-                                className="ml-6 flex flex-col gap-1.5"
-                              >
-                                {cat.subCategories.map((sub) => (
-                                  <Checkbox key={sub.id} value={sub.id}>
-                                    <Checkbox.Control>
-                                      <Checkbox.Indicator />
-                                    </Checkbox.Control>
-                                    <Checkbox.Content>
-                                      <Label className="text-xs cursor-pointer">
-                                        {sub.name}
-                                      </Label>
-                                    </Checkbox.Content>
-                                  </Checkbox>
-                                ))}
-                              </CheckboxGroup>
-                            </Disclosure.Body>
-                          </Disclosure.Content>
-                        )}
+                        <Disclosure.Content>
+                          <Disclosure.Body className="px-3 pb-3">
+                            <CheckboxGroup
+                              value={selectedSubIds}
+                              onChange={(newValues: string[]) =>
+                                handleSubCategoryChange(
+                                  sourceId,
+                                  cat,
+                                  newValues
+                                )
+                              }
+                              className="ml-6 flex flex-col gap-1.5"
+                            >
+                              {cat.subCategories.map((sub) => (
+                                <Checkbox key={sub.id} value={sub.id}>
+                                  <Checkbox.Control>
+                                    <Checkbox.Indicator />
+                                  </Checkbox.Control>
+                                  <Checkbox.Content>
+                                    <Label className="text-xs cursor-pointer">
+                                      {sub.name}
+                                    </Label>
+                                  </Checkbox.Content>
+                                </Checkbox>
+                              ))}
+                            </CheckboxGroup>
+                          </Disclosure.Body>
+                        </Disclosure.Content>
                       </Disclosure>
                     );
                   })}

@@ -60,7 +60,20 @@ export async function POST(req: NextRequest) {
             source: sourceId,
             status: "running",
             message: `开始抓取 ${crawler.source.name}...`,
+            current: 0,
+            total: 0,
           });
+
+          // 设置进度回调：报告每个源的 current/total
+          crawler.onProgress = (current: number, total: number, message: string) => {
+            send("progress", {
+              source: sourceId,
+              status: "running",
+              message,
+              current,
+              total,
+            });
+          };
 
           // 设置增量回调：每批职位完成后立即存储 + 推送
           crawler.onJobsBatch = (jobs: JobPosting[]) => {

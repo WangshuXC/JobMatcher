@@ -39,28 +39,6 @@ const CATEGORY_TECH = "130";
 /** 前端开发子类 ID */
 const SUB_CATEGORY_FRONTEND = "133";
 
-/** 技术类下的所有子类 ID */
-const SUB_CATEGORY_LIST = [
-  "133", // 前端
-  "135", // 运维
-  "136", // 开发
-  "137", // 质量保证
-  "407", // 安全
-  "408", // 数据
-  "409", // 算法
-  "410", // 综合
-  "411", // 综合管理
-  "511", // 地图
-  "702", // 基础平台
-  "703", // 无线（端）
-  "704", // 综合
-  "747", // 研究
-  "764", // 多媒体技术
-  "769", // 游戏技术
-  "798", // 芯片
-  "811", // 方案与服务
-];
-
 /*
  * 阿里巴巴招聘完整分类参考 (来源: /category/list API):
  *
@@ -419,17 +397,19 @@ export class AlibabaCrawler extends BaseCrawler {
   }
 
   /**
-   * 从所有子站抓取职位列表
-   * 通过 page.evaluate + fetch 主动调用 API，精确筛选岗位
+   * 从所有子站并行抓取职位列表
+   *
+   * 策略：
+   * 1. 并行初始化多个子站（每个子站独立 page + session + CSRF）
+   * 2. 每个子站内并行翻页
+   * 3. 增量推送数据
    *
    * @param maxJobs - 最大抓取数量（Infinity 表示全部抓取）
    * @param selectedCategoryIds - 用户选中的大类 ID 列表（可选）
    */
   protected async crawlJobList(
-    page: Page,
     maxJobs: number,
     selectedCategoryIds?: string[],
-    keyword?: string
   ): Promise<Partial<JobPosting>[]> {
     // selectedCategoryIds 现在直接是子分类 ID 列表
     // 阿里 API 需要按大类分组查询：categories 传大类 ID，subCategories 传子分类 ID
@@ -471,143 +451,121 @@ export class AlibabaCrawler extends BaseCrawler {
     const allJobs: Partial<JobPosting>[] = [];
     const seenIds = new Set<string>();
 
-    for (const subsite of SUBSITES) {
-      if (allJobs.length >= maxJobs) break;
+    // 并行处理子站（控制并发数）
+    const SUBSITE_CONCURRENCY = 4;
 
-      console.log(`\n[阿里巴巴] === ${subsite.name} ===`);
+    for (let i = 0; i < SUBSITES.length && allJobs.length < maxJobs; i += SUBSITE_CONCURRENCY) {
+      const subsiteBatch = SUBSITES.slice(i, i + SUBSITE_CONCURRENCY);
+      console.log(`\n[阿里巴巴] === 并行处理子站批次: ${subsiteBatch.map((s) => s.name).join(", ")} ===`);
 
-      // 每个子站独立 try-catch，一个子站异常不影响后续子站
-      try {
-        // 访问子站列表页，建立 session + CSRF
-        const url = `${subsite.domain}${subsite.listPath}`;
-        console.log(`[阿里巴巴] 初始化子站 ${subsite.name}: ${url}`);
-        await this.safeGoto(page, url);
-        await this.randomDelay(1000, 2000);
+      const subsitePromises = subsiteBatch.map(async (subsite) => {
+        const subsiteJobs: Partial<JobPosting>[] = [];
 
-        // 提取当前子站域名下的 CSRF token
-        const csrfToken = await this.getCSRFToken(page, subsite.domain);
-        if (!csrfToken) {
-          console.log(
-            `[阿里巴巴] ${subsite.name} 未获取到 CSRF token，跳过`
-          );
-          continue;
-        }
-        console.log(
-          `[阿里巴巴] ${subsite.name} CSRF token: ${csrfToken.substring(0, 8)}...`
-        );
+        try {
+          // 每个子站创建独立 page，建立 session + CSRF
+          const page = await this.newPage();
+          const url = `${subsite.domain}${subsite.listPath}`;
+          console.log(`[阿里巴巴] 初始化子站 ${subsite.name}: ${url}`);
+          await this.safeGoto(page, url);
+          await this.randomDelay(1000, 2000);
 
-        let subsiteCount = 0;
-
-        // 按每个大类分别查询
-        for (const query of queries) {
-          if (allJobs.length >= maxJobs) break;
-
-          // 第一页请求，获取 totalCount
-          const firstPageData = await this.fetchSearchApi(
-            page,
-            subsite,
-            1,
-            csrfToken,
-            query.categories,
-            query.subCategories
-          );
-
-          if (
-            !firstPageData?.content?.datas ||
-            firstPageData.content.datas.length === 0
-          ) {
-            console.log(
-              `[阿里巴巴] ${subsite.name} 分类 ${query.categories} 无岗位数据，跳过`
-            );
-            continue;
+          // 提取当前子站域名下的 CSRF token
+          const csrfToken = await this.getCSRFToken(page, subsite.domain);
+          if (!csrfToken) {
+            console.log(`[阿里巴巴] ${subsite.name} 未获取到 CSRF token，跳过`);
+            await page.close();
+            return subsiteJobs;
           }
+          console.log(`[阿里巴巴] ${subsite.name} CSRF token: ${csrfToken.substring(0, 8)}...`);
 
-          const totalCount = firstPageData.content.totalCount;
-          const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-          console.log(
-            `[阿里巴巴] ${subsite.name} 分类 ${query.categories} 共 ${totalCount} 个岗位，${totalPages} 页`
-          );
-
-          // 处理第一页
-          const firstPageJobs = this.processPositions(
-            firstPageData.content.datas,
-            subsite,
-            seenIds
-          );
-          allJobs.push(...firstPageJobs);
-          subsiteCount += firstPageJobs.length;
-
-          // 调用回调推送第一批数据
-          if (firstPageJobs.length > 0 && this.onJobsBatch) {
-            this.onJobsBatch(firstPageJobs.map((j) => this.partialToFull(j)));
-          }
-
-          // 翻页获取更多数据
-          for (
-            let pageIndex = 2;
-            pageIndex <= totalPages && allJobs.length < maxJobs;
-            pageIndex++
-          ) {
-            console.log(
-              `[阿里巴巴] ${subsite.name} 分类 ${query.categories} 第 ${pageIndex}/${totalPages} 页`
+          // 按每个大类分别查询
+          for (const query of queries) {
+            // 第一页请求，获取 totalCount
+            const firstPageData = await this.fetchSearchApi(
+              page, subsite, 1, csrfToken, query.categories, query.subCategories
             );
 
-            const pageData = await this.fetchSearchApi(
-              page,
-              subsite,
-              pageIndex,
-              csrfToken,
-              query.categories,
-              query.subCategories
-            );
-
-            if (
-              !pageData?.content?.datas ||
-              pageData.content.datas.length === 0
-            ) {
-              console.log(
-                `[阿里巴巴] ${subsite.name} 分类 ${query.categories} 第 ${pageIndex} 页无数据，停止`
-              );
-              break;
+            if (!firstPageData?.content?.datas || firstPageData.content.datas.length === 0) {
+              console.log(`[阿里巴巴] ${subsite.name} 分类 ${query.categories} 无岗位数据，跳过`);
+              continue;
             }
 
-            const pageJobs = this.processPositions(
-              pageData.content.datas,
-              subsite,
-              seenIds
-            );
-            allJobs.push(...pageJobs);
-            subsiteCount += pageJobs.length;
+            const totalCount = firstPageData.content.totalCount;
+            const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+            console.log(`[阿里巴巴] ${subsite.name} 分类 ${query.categories} 共 ${totalCount} 个岗位，${totalPages} 页`);
 
-            // 调用回调推送这批数据
-            if (pageJobs.length > 0 && this.onJobsBatch) {
-              this.onJobsBatch(pageJobs.map((j) => this.partialToFull(j)));
+            // 处理第一页
+            const firstPageJobs = this.processPositions(firstPageData.content.datas, subsite, seenIds);
+            subsiteJobs.push(...firstPageJobs);
+
+            // 调用回调推送第一批数据
+            if (firstPageJobs.length > 0 && this.onJobsBatch) {
+              this.onJobsBatch(firstPageJobs.map((j) => this.partialToFull(j)));
             }
 
-            if (allJobs.length >= maxJobs) break;
+            if (totalPages <= 1) continue;
 
-            // 翻页延迟
-            await this.randomDelay(800, 1500);
+            // 并行翻页（子站内）
+            const LIST_PAGE_CONCURRENCY = 3;
+            const remainingPages = Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2);
+
+            for (let pi = 0; pi < remainingPages.length; pi += LIST_PAGE_CONCURRENCY) {
+              const pageBatch = remainingPages.slice(pi, pi + LIST_PAGE_CONCURRENCY);
+
+              const pagePromises = pageBatch.map(async (pageIndex) => {
+                // 复用同一个 page 的 session（串行请求同 page）
+                // 对于阿里，由于 CSRF token 绑定到 cookie，我们需要在同一 page 上发请求
+                return this.fetchSearchApi(
+                  page, subsite, pageIndex, csrfToken, query.categories, query.subCategories
+                );
+              });
+
+              const pageResults = await Promise.all(pagePromises);
+
+              for (const pageData of pageResults) {
+                if (!pageData?.content?.datas || pageData.content.datas.length === 0) continue;
+                const pageJobs = this.processPositions(pageData.content.datas, subsite, seenIds);
+                subsiteJobs.push(...pageJobs);
+
+                if (pageJobs.length > 0 && this.onJobsBatch) {
+                  this.onJobsBatch(pageJobs.map((j) => this.partialToFull(j)));
+                }
+              }
+
+              // 翻页批次间短延迟
+              if (pi + LIST_PAGE_CONCURRENCY < remainingPages.length) {
+                await this.randomDelay(500, 1000);
+              }
+            }
           }
+
+          await page.close();
+        } catch (err) {
+          console.error(`[阿里巴巴] ${subsite.name} 爬取异常:`, err);
         }
 
-        console.log(
-          `[阿里巴巴] ${subsite.name} 获取 ${subsiteCount} 个岗位`
-        );
-      } catch (err) {
-        console.error(
-          `[阿里巴巴] ${subsite.name} 爬取异常（已获取 ${allJobs.length} 个职位，继续下一子站）:`,
-          err
-        );
+        console.log(`[阿里巴巴] ${subsite.name} 获取 ${subsiteJobs.length} 个岗位`);
+        return subsiteJobs;
+      });
+
+      const subsiteResults = await Promise.all(subsitePromises);
+
+      for (const jobs of subsiteResults) {
+        allJobs.push(...jobs);
       }
 
-      // 子站间延迟
-      await this.randomDelay(1500, 3000);
+      // 报告进度
+      if (this.onProgress) {
+        this.onProgress(allJobs.length, 0, `已从 ${Math.min(i + SUBSITE_CONCURRENCY, SUBSITES.length)}/${SUBSITES.length} 个子站抓取 ${allJobs.length} 个岗位`);
+      }
+
+      // 子站批次间延迟
+      if (i + SUBSITE_CONCURRENCY < SUBSITES.length && allJobs.length < maxJobs) {
+        await this.randomDelay(1000, 2000);
+      }
     }
 
-    console.log(
-      `\n[阿里巴巴] 总计获取 ${allJobs.length} 个岗位`
-    );
+    console.log(`\n[阿里巴巴] 总计获取 ${allJobs.length} 个岗位`);
     return maxJobs < Infinity ? allJobs.slice(0, maxJobs) : allJobs;
   }
 

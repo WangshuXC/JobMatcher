@@ -10,6 +10,24 @@ interface CrawlResultData {
   duration?: number;
 }
 
+/** 单个数据源的实时进度 */
+export interface SourceProgress {
+  /** 数据源 ID */
+  sourceId: string;
+  /** 状态 */
+  status: "pending" | "running" | "completed" | "error";
+  /** 当前已处理数 */
+  current: number;
+  /** 总数（0 = 未知） */
+  total: number;
+  /** 进度描述 */
+  message: string;
+  /** 已入库职位数 */
+  jobCount: number;
+  /** 耗时（ms，完成后才有） */
+  duration?: number;
+}
+
 /** 每个数据源的关键词配置 */
 export type KeywordConfig = Record<string, string>;
 
@@ -32,6 +50,8 @@ interface CrawlerState {
   categoryConfig: CategoryConfig;
   /** 每个数据源的搜索关键词（key: sourceId, value: keyword） */
   keywordConfig: KeywordConfig;
+  /** 各数据源的实时进度（key: sourceId） */
+  sourceProgress: Record<string, SourceProgress>;
 }
 
 interface CrawlerActions {
@@ -52,6 +72,10 @@ interface CrawlerActions {
   setCategoryConfigAll: (config: CategoryConfig) => void;
   /** 设置某个数据源的搜索关键词 */
   setKeywordConfig: (sourceId: string, keyword: string) => void;
+  /** 更新单个数据源的进度 */
+  updateSourceProgress: (sourceId: string, update: Partial<SourceProgress>) => void;
+  /** 初始化所有选中源的进度为 pending */
+  initSourceProgress: (sourceIds: string[]) => void;
 }
 
 export type CrawlerStore = CrawlerState & CrawlerActions;
@@ -69,6 +93,7 @@ export const useCrawlerStore = create<CrawlerStore>((set) => ({
   crawledCount: 0,
   categoryConfig: getDefaultCategoryConfig(),
   keywordConfig: {},
+  sourceProgress: {},
 
   // -- actions --
   setSources: (sources) => set({ sources }),
@@ -103,6 +128,27 @@ export const useCrawlerStore = create<CrawlerStore>((set) => ({
       keywordConfig: { ...s.keywordConfig, [sourceId]: keyword },
     })),
 
+  updateSourceProgress: (sourceId, update) =>
+    set((s) => ({
+      sourceProgress: {
+        ...s.sourceProgress,
+        [sourceId]: {
+          ...s.sourceProgress[sourceId],
+          ...update,
+        },
+      },
+    })),
+
+  initSourceProgress: (sourceIds) =>
+    set({
+      sourceProgress: Object.fromEntries(
+        sourceIds.map((id) => [
+          id,
+          { sourceId: id, status: "pending" as const, current: 0, total: 0, message: "等待中...", jobCount: 0 },
+        ])
+      ),
+    }),
+
   resetCrawlState: () =>
-    set({ results: [], progressMsg: "", crawledCount: 0 }),
+    set({ results: [], progressMsg: "", crawledCount: 0, sourceProgress: {} }),
 }));

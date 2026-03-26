@@ -32,25 +32,6 @@ const PAGE_SIZE = 50;
 /** 前端开发子类 category ID */
 const CATEGORY_FRONTEND = "6704215886108035339";
 
-/**
- * 研发大类下的所有子类 ID（共 12 个）
- * 选择"研发"大类时，字节前端会将其展开为这些子类 ID 一并发送
- */
-const CATEGORY_RD_ALL = [
-  "6704215862557018372", // 后端
-  "6704215886108035339", // 前端
-  "6704215888985327886", // 大数据
-  "6704215897130666254", // 测试
-  "6704215956018694411", // 算法
-  "6704215957146962184", // 客户端
-  "6704215958816295181", // 基础架构
-  "6704216109274368264", // 安全
-  "6704216635923761412", // 数据挖掘
-  "6704217321877014787", // 运维
-  "6704219534724696331", // 机器学习
-  "6938376045242353957", // 硬件
-];
-
 /*
  * 字节跳动招聘完整分类参考:
  *
@@ -355,17 +336,15 @@ export class BytedanceCrawler extends BaseCrawler {
   }
 
   /**
-   * 通过 API 抓取职位列表
+   * 通过 API 并行抓取职位列表
    *
+   * 策略：先获取第 1 页得到 totalCount，计算总页数后并行请求所有剩余页面。
    * 因为列表 API 已返回完整的 description + requirement，
-   * 这里直接组装完整的 JobPosting（带一个特殊标记），
-   * 让 crawlJobDetail 直接返回已有数据，跳过详情页抓取。
+   * 这里直接组装完整的 JobPosting，让 crawlJobDetail 直接返回已有数据。
    */
   protected async crawlJobList(
-    page: Page,
     maxJobs: number,
     selectedCategoryIds?: string[],
-    keyword?: string
   ): Promise<Partial<JobPosting>[]> {
     // selectedCategoryIds 现在直接是子分类 ID 列表，无需展开
     const categoryIds =
@@ -373,79 +352,133 @@ export class BytedanceCrawler extends BaseCrawler {
         ? selectedCategoryIds
         : [CATEGORY_FRONTEND];
 
-    const allJobs: Partial<JobPosting>[] = [];
-
     // 先访问首页建立 cookie/session
-    await this.safeGoto(page, this.source.baseUrl);
+    const initPage = await this.newPage();
+    await this.safeGoto(initPage, this.source.baseUrl);
     await this.randomDelay(1000, 2000);
 
-    // 分页获取
-    for (let offset = 0; offset < maxJobs; offset += PAGE_SIZE) {
-      const limit = Math.min(PAGE_SIZE, maxJobs - offset);
-      const data = await this.fetchSearchApi(page, offset, limit, categoryIds);
+    // 第 1 页：获取 totalCount
+    const firstData = await this.fetchSearchApi(initPage, 0, PAGE_SIZE, categoryIds);
+    await initPage.close();
 
-      if (!data || !data.data.job_post_list || data.data.job_post_list.length === 0) {
-        console.log(`[字节跳动] offset=${offset} 无数据，停止翻页`);
-        break;
-      }
+    if (!firstData || !firstData.data.job_post_list || firstData.data.job_post_list.length === 0) {
+      console.log("[字节跳动] 第 1 页无数据，终止");
+      return [];
+    }
 
-      const pageIndex = Math.floor(offset / PAGE_SIZE) + 1;
-      const totalPages = Math.ceil(maxJobs / PAGE_SIZE);
-      console.log(
-        `[字节跳动] 第 ${pageIndex}/${totalPages} 页获取到 ${data.data.job_post_list.length} 个职位`
-      );
+    const totalCount = firstData.data.count;
+    const totalPages = Math.ceil(Math.min(totalCount, maxJobs) / PAGE_SIZE);
+    console.log(`[字节跳动] 共 ${totalCount} 个职位，${totalPages} 页（目标 ${maxJobs} 个）`);
 
-      for (const post of data.data.job_post_list) {
-        // 构建城市信息：优先使用 city_list（多城市），否则用 city_info
-        const locations: string[] = [];
-        if (post.city_list && post.city_list.length > 0) {
-          for (const city of post.city_list) {
-            if (city.name) locations.push(city.name);
-          }
-        } else if (post.city_info?.name) {
-          locations.push(post.city_info.name);
-        }
-        const location = locations.join("、") || "未知";
-
-        // 构建分类信息：子类别 + 父类别
-        const categoryParts: string[] = [];
-        if (post.job_category?.parent?.name) {
-          categoryParts.push(post.job_category.parent.name);
-        }
-        if (post.job_category?.name) {
-          categoryParts.push(post.job_category.name);
-        }
-        if (post.recruit_type?.name) {
-          categoryParts.push(post.recruit_type.name);
-        }
-        const category = categoryParts.join(" - ") || "";
-
-        const detailUrl = `${this.source.baseUrl}/experienced/position/${post.id}/detail`;
-
-        allJobs.push({
-          id: `${this.source.id}_${post.id}`,
-          title: post.title,
-          source: this.source.id,
-          company: this.source.company,
-          sourceId: post.id,
-          detailUrl,
-          location,
-          description: post.description || "",
-          requirements: post.requirement || "",
-          category,
-          crawledAt: new Date().toISOString(),
-        });
-
-        if (allJobs.length >= maxJobs) break;
-      }
-
+    // 解析第 1 页的数据
+    const allJobs: Partial<JobPosting>[] = [];
+    for (const post of firstData.data.job_post_list) {
       if (allJobs.length >= maxJobs) break;
+      allJobs.push(this.parsePost(post));
+    }
 
-      // 翻页间延迟
-      await this.randomDelay(500, 1500);
+    if (this.onProgress) {
+      this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 第 1/${totalPages} 页`);
+    }
+
+    if (allJobs.length >= maxJobs || totalPages <= 1) {
+      return allJobs.slice(0, maxJobs);
+    }
+
+    // 并行请求剩余页面
+    const LIST_CONCURRENCY = 5;
+    const remainingOffsets = Array.from(
+      { length: totalPages - 1 },
+      (_, i) => (i + 1) * PAGE_SIZE
+    );
+
+    for (let i = 0; i < remainingOffsets.length && allJobs.length < maxJobs; i += LIST_CONCURRENCY) {
+      const batch = remainingOffsets.slice(i, i + LIST_CONCURRENCY);
+      const batchNum = Math.floor(i / LIST_CONCURRENCY) + 1;
+      const totalBatches = Math.ceil(remainingOffsets.length / LIST_CONCURRENCY);
+      console.log(`[字节跳动] 并行抓取列表 批次 ${batchNum}/${totalBatches}`);
+
+      const promises = batch.map(async (offset) => {
+        const page = await this.newPage();
+        try {
+          await this.safeGoto(page, this.source.baseUrl);
+          await this.randomDelay(300, 800);
+          const limit = Math.min(PAGE_SIZE, maxJobs - offset);
+          return await this.fetchSearchApi(page, offset, limit, categoryIds);
+        } catch (err) {
+          console.error(`[字节跳动] offset=${offset} 请求失败:`, err);
+          return null;
+        } finally {
+          await page.close();
+        }
+      });
+
+      const results = await Promise.all(promises);
+
+      for (const data of results) {
+        if (!data?.data?.job_post_list) continue;
+        for (const post of data.data.job_post_list) {
+          if (allJobs.length >= maxJobs) break;
+          allJobs.push(this.parsePost(post));
+        }
+      }
+
+      if (this.onProgress) {
+        this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 批次 ${batchNum}/${totalBatches}`);
+      }
+
+      // 批次间短延迟
+      if (i + LIST_CONCURRENCY < remainingOffsets.length && allJobs.length < maxJobs) {
+        await this.randomDelay(300, 800);
+      }
     }
 
     return allJobs.slice(0, maxJobs);
+  }
+
+  /**
+   * 解析单条 API 返回的职位数据
+   */
+  private parsePost(post: BytedanceJobPost): Partial<JobPosting> {
+    // 构建城市信息：优先使用 city_list（多城市），否则用 city_info
+    const locations: string[] = [];
+    if (post.city_list && post.city_list.length > 0) {
+      for (const city of post.city_list) {
+        if (city.name) locations.push(city.name);
+      }
+    } else if (post.city_info?.name) {
+      locations.push(post.city_info.name);
+    }
+    const location = locations.join("、") || "未知";
+
+    // 构建分类信息：子类别 + 父类别
+    const categoryParts: string[] = [];
+    if (post.job_category?.parent?.name) {
+      categoryParts.push(post.job_category.parent.name);
+    }
+    if (post.job_category?.name) {
+      categoryParts.push(post.job_category.name);
+    }
+    if (post.recruit_type?.name) {
+      categoryParts.push(post.recruit_type.name);
+    }
+    const category = categoryParts.join(" - ") || "";
+
+    const detailUrl = `${this.source.baseUrl}/experienced/position/${post.id}/detail`;
+
+    return {
+      id: `${this.source.id}_${post.id}`,
+      title: post.title,
+      source: this.source.id,
+      company: this.source.company,
+      sourceId: post.id,
+      detailUrl,
+      location,
+      description: post.description || "",
+      requirements: post.requirement || "",
+      category,
+      crawledAt: new Date().toISOString(),
+    };
   }
 
   /**
