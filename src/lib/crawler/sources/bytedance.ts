@@ -202,10 +202,12 @@ export class BytedanceCrawler extends BaseCrawler {
 
   /**
    * 调用列表搜索 API
-   * 使用 Playwright page.evaluate 中的 fetch 来避免 CORS 问题
+   *
+   * 使用 Playwright 的 APIRequestContext（context.request）直接发送 HTTP 请求，
+   * 无需创建浏览器页面。天然共享 BrowserContext 的 cookies，
+   * 且避免了 about:blank 页面中 fetch 因 origin 为 null 导致的跨域失败。
    */
   private async fetchSearchApi(
-    page: Page,
     offset: number,
     limit: number = PAGE_SIZE,
     categoryIds: string[] = [CATEGORY_FRONTEND]
@@ -218,17 +220,12 @@ export class BytedanceCrawler extends BaseCrawler {
     );
 
     try {
-      const response = await page.evaluate(
-        async ({ url, body }: { url: string; body: BytedanceSearchBody }) => {
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          return res.json();
-        },
-        { url: apiUrl, body }
-      );
+      const res = await this.context!.request.post(apiUrl, {
+        headers: { "Content-Type": "application/json" },
+        data: body,
+      });
+
+      const response = await res.json();
 
       if (response?.code === 0 && response?.data) {
         return response as BytedanceSearchResponse;
@@ -246,120 +243,50 @@ export class BytedanceCrawler extends BaseCrawler {
   }
 
   /**
-   * 调用详情 API，获取单个职位的完整数据
-   * 用于列表 API 返回的数据不完整时的回退方案
+   * 将 Partial<JobPosting> 转换为完整 JobPosting
    */
-  private async fetchDetailApi(
-    page: Page,
-    postId: string
-  ): Promise<BytedanceJobPost | null> {
-    const apiUrl = `${API_BASE}/job/posts/${postId}?portal_type=2`;
-
-    console.log(`[字节跳动] 调用详情 API: postId=${postId}`);
-
-    try {
-      const response = await page.evaluate(
-        async (url: string) => {
-          const res = await fetch(url, {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
-          });
-          return res.json();
-        },
-        apiUrl
-      );
-
-      if (response?.code === 0 && response?.data?.job_post) {
-        return response.data.job_post as BytedanceJobPost;
-      }
-
-      console.log(
-        "[字节跳动] 详情 API 返回异常:",
-        JSON.stringify(response).substring(0, 200)
-      );
-      return null;
-    } catch (err) {
-      console.log("[字节跳动] 详情 API 调用失败:", err);
-      return null;
-    }
-  }
-
-  /**
-   * 判断列表 API 返回的职位数据是否完整
-   * description/requirement/location 任一缺失即视为不完整
-   */
-  private isJobDataIncomplete(partialJob: Partial<JobPosting>): boolean {
-    return (
-      !partialJob.description ||
-      !partialJob.requirements ||
-      partialJob.location === "未知"
-    );
-  }
-
-  /**
-   * 从详情 API 返回的 job_post 中提取补全信息
-   */
-  private parseDetailPost(post: BytedanceJobPost): {
-    description: string;
-    requirements: string;
-    location: string;
-    category: string;
-  } {
-    // 构建城市信息
-    const locations: string[] = [];
-    if (post.city_list && post.city_list.length > 0) {
-      for (const city of post.city_list) {
-        if (city.name) locations.push(city.name);
-      }
-    } else if (post.city_info?.name) {
-      locations.push(post.city_info.name);
-    }
-
-    // 构建分类信息
-    const categoryParts: string[] = [];
-    if (post.job_category?.parent?.name) {
-      categoryParts.push(post.job_category.parent.name);
-    }
-    if (post.job_category?.name) {
-      categoryParts.push(post.job_category.name);
-    }
-    if (post.recruit_type?.name) {
-      categoryParts.push(post.recruit_type.name);
-    }
-
+  private partialToFull(partial: Partial<JobPosting>): JobPosting {
     return {
-      description: post.description || "",
-      requirements: post.requirement || "",
-      location: locations.join("、") || "未知",
-      category: categoryParts.join(" - ") || "",
+      id: partial.id || `${this.source.id}_${partial.sourceId}`,
+      title: partial.title || "未知职位",
+      company: partial.company || this.source.company,
+      source: this.source.id,
+      location: partial.location || "未知",
+      sourceId: partial.sourceId || "",
+      description: partial.description || "暂无描述",
+      requirements: partial.requirements || "暂无要求",
+      detailUrl: partial.detailUrl || "",
+      crawledAt: partial.crawledAt || new Date().toISOString(),
+      category: partial.category,
     };
   }
 
   /**
    * 通过 API 并行抓取职位列表
    *
-   * 策略：先获取第 1 页得到 totalCount，计算总页数后并行请求所有剩余页面。
-   * 因为列表 API 已返回完整的 description + requirement，
-   * 这里直接组装完整的 JobPosting，让 crawlJobDetail 直接返回已有数据。
+   * 策略：
+   * 1. 先获取第 1 页得到 totalCount，计算总页数后并行请求所有剩余页面
+   * 2. 列表 API 已返回完整的 description + requirement，无需再访问详情
+   * 3. 在列表阶段通过 onJobsBatch 增量推送完整数据
+   * 4. 返回空数组跳过 base.ts 的 crawlDetailsInParallel（避免不必要的 page 创建和批次延迟）
    */
   protected async crawlJobList(
     maxJobs: number,
     selectedCategoryIds?: string[],
   ): Promise<Partial<JobPosting>[]> {
-    // selectedCategoryIds 现在直接是子分类 ID 列表，无需展开
     const categoryIds =
       selectedCategoryIds && selectedCategoryIds.length > 0
         ? selectedCategoryIds
         : [CATEGORY_FRONTEND];
 
-    // 先访问首页建立 cookie/session
+    // 先访问首页建立 cookie/session（cookie 会存储在 BrowserContext 中）
     const initPage = await this.newPage();
     await this.safeGoto(initPage, this.source.baseUrl);
     await this.randomDelay(1000, 2000);
-
-    // 第 1 页：获取 totalCount
-    const firstData = await this.fetchSearchApi(initPage, 0, PAGE_SIZE, categoryIds);
     await initPage.close();
+
+    // 第 1 页：获取 totalCount（使用 context.request，无需页面）
+    const firstData = await this.fetchSearchApi(0, PAGE_SIZE, categoryIds);
 
     if (!firstData || !firstData.data.job_post_list || firstData.data.job_post_list.length === 0) {
       console.log("[字节跳动] 第 1 页无数据，终止");
@@ -367,25 +294,31 @@ export class BytedanceCrawler extends BaseCrawler {
     }
 
     const totalCount = firstData.data.count;
-    const totalPages = Math.ceil(Math.min(totalCount, maxJobs) / PAGE_SIZE);
-    console.log(`[字节跳动] 共 ${totalCount} 个职位，${totalPages} 页（目标 ${maxJobs} 个）`);
+    const targetCount = Math.min(totalCount, maxJobs);
+    const totalPages = Math.ceil(targetCount / PAGE_SIZE);
+    console.log(`[字节跳动] 共 ${totalCount} 个职位，${totalPages} 页（目标 ${maxJobs === Infinity ? '全部' : maxJobs} 个）`);
 
-    // 解析第 1 页的数据
+    // 解析第 1 页的数据并增量推送
     const allJobs: Partial<JobPosting>[] = [];
     for (const post of firstData.data.job_post_list) {
       if (allJobs.length >= maxJobs) break;
       allJobs.push(this.parsePost(post));
     }
 
+    // 增量推送第 1 页
+    if (allJobs.length > 0 && this.onJobsBatch) {
+      this.onJobsBatch(allJobs.map((j) => this.partialToFull(j)));
+    }
+
     if (this.onProgress) {
-      this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 第 1/${totalPages} 页`);
+      this.onProgress(allJobs.length, targetCount, `已抓取 ${allJobs.length}/${targetCount} 个职位`);
     }
 
     if (allJobs.length >= maxJobs || totalPages <= 1) {
-      return allJobs.slice(0, maxJobs);
+      return [];
     }
 
-    // 并行请求剩余页面
+    // 并行请求剩余页面（cookie 在 BrowserContext 级别共享，新 page 无需再访问首页）
     const LIST_CONCURRENCY = 5;
     const remainingOffsets = Array.from(
       { length: totalPages - 1 },
@@ -399,32 +332,35 @@ export class BytedanceCrawler extends BaseCrawler {
       console.log(`[字节跳动] 并行抓取列表 批次 ${batchNum}/${totalBatches}`);
 
       const promises = batch.map(async (offset) => {
-        const page = await this.newPage();
         try {
-          await this.safeGoto(page, this.source.baseUrl);
-          await this.randomDelay(300, 800);
           const limit = Math.min(PAGE_SIZE, maxJobs - offset);
-          return await this.fetchSearchApi(page, offset, limit, categoryIds);
+          return await this.fetchSearchApi(offset, limit, categoryIds);
         } catch (err) {
           console.error(`[字节跳动] offset=${offset} 请求失败:`, err);
           return null;
-        } finally {
-          await page.close();
         }
       });
 
       const results = await Promise.all(promises);
 
+      const batchJobs: Partial<JobPosting>[] = [];
       for (const data of results) {
         if (!data?.data?.job_post_list) continue;
         for (const post of data.data.job_post_list) {
           if (allJobs.length >= maxJobs) break;
-          allJobs.push(this.parsePost(post));
+          const job = this.parsePost(post);
+          allJobs.push(job);
+          batchJobs.push(job);
         }
       }
 
+      // 增量推送本批数据
+      if (batchJobs.length > 0 && this.onJobsBatch) {
+        this.onJobsBatch(batchJobs.map((j) => this.partialToFull(j)));
+      }
+
       if (this.onProgress) {
-        this.onProgress(allJobs.length, Math.min(totalCount, maxJobs), `已抓取列表 批次 ${batchNum}/${totalBatches}`);
+        this.onProgress(allJobs.length, targetCount, `已抓取 ${allJobs.length}/${targetCount} 个职位`);
       }
 
       // 批次间短延迟
@@ -433,7 +369,11 @@ export class BytedanceCrawler extends BaseCrawler {
       }
     }
 
-    return allJobs.slice(0, maxJobs);
+    console.log(`[字节跳动] 列表抓取完成，共 ${allJobs.length} 个职位`);
+
+    // 返回空数组：所有数据已通过 onJobsBatch 增量推送完成，
+    // 无需再经过 base.ts 的 crawlDetailsInParallel
+    return [];
   }
 
   /**
@@ -484,57 +424,13 @@ export class BytedanceCrawler extends BaseCrawler {
   /**
    * 抓取单个职位详情
    *
-   * 优先使用列表 API 已返回的数据。
-   * 当关键字段（description、requirement、location）缺失时，
-   * 回退到详情 API 获取完整数据。
+   * 列表 API 已返回完整的 description + requirement，
+   * 所有数据在 crawlJobList 阶段已通过 onJobsBatch 推送，此方法仅作为基类接口实现。
    */
   protected async crawlJobDetail(
-    page: Page,
+    _page: Page,
     partialJob: Partial<JobPosting>
   ): Promise<JobPosting> {
-    // 如果列表数据不完整，尝试通过详情 API 补全
-    if (this.isJobDataIncomplete(partialJob) && partialJob.sourceId) {
-      console.log(
-        `[字节跳动] 职位 "${partialJob.title}" 数据不完整（location=${partialJob.location}），尝试详情 API 补全...`
-      );
-
-      const detailPost = await this.fetchDetailApi(page, partialJob.sourceId);
-
-      if (detailPost) {
-        const detail = this.parseDetailPost(detailPost);
-        return {
-          id: partialJob.id || `${this.source.id}_${partialJob.sourceId}`,
-          title: detailPost.title || partialJob.title || "未知职位",
-          company: this.source.company,
-          source: this.source.id,
-          location: detail.location !== "未知" ? detail.location : (partialJob.location || "未知"),
-          sourceId: partialJob.sourceId || "",
-          description: detail.description || partialJob.description || "暂无描述",
-          requirements: detail.requirements || partialJob.requirements || "暂无要求",
-          detailUrl: partialJob.detailUrl || "",
-          crawledAt: partialJob.crawledAt || new Date().toISOString(),
-          category: detail.category || partialJob.category,
-        };
-      }
-
-      console.log(
-        `[字节跳动] 详情 API 未返回有效数据，使用列表数据`
-      );
-    }
-
-    // 列表 API 已提供完整数据，直接返回
-    return {
-      id: partialJob.id || `${this.source.id}_${partialJob.sourceId}`,
-      title: partialJob.title || "未知职位",
-      company: this.source.company,
-      source: this.source.id,
-      location: partialJob.location || "未知",
-      sourceId: partialJob.sourceId || "",
-      description: partialJob.description || "暂无描述",
-      requirements: partialJob.requirements || "暂无要求",
-      detailUrl: partialJob.detailUrl || "",
-      crawledAt: partialJob.crawledAt || new Date().toISOString(),
-      category: partialJob.category,
-    };
+    return this.partialToFull(partialJob);
   }
 }

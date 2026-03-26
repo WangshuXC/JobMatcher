@@ -264,7 +264,7 @@ export abstract class BaseCrawler {
 
       const message = errorMsg
         ? `抓取部分完成（${totalJobCount} 个职位），${errorMsg}`
-        : `成功抓取 ${jobs.length} 个职位`;
+        : `成功抓取 ${totalJobCount} 个职位`;
       console.log(`[${this.source.name}] ${message}`);
     } catch (err) {
       // 浏览器启动等全局错误
@@ -284,7 +284,7 @@ export abstract class BaseCrawler {
       jobCount: totalJobCount,
       message: errorMsg
         ? `抓取部分完成（${totalJobCount} 个职位），${errorMsg}`
-        : `成功抓取 ${jobs.length} 个职位`,
+        : `成功抓取 ${totalJobCount} 个职位`,
       duration: Date.now() - startTime,
       jobs,
     };

@@ -31,7 +31,7 @@ import { BaseCrawler } from "../base";
 import { JobPosting, CrawlerSource } from "@/types";
 import { ALIBABA_CATEGORIES } from "../categories";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
 /** 技术类大类 ID */
 const CATEGORY_TECH = "130";
@@ -506,7 +506,7 @@ export class AlibabaCrawler extends BaseCrawler {
             if (totalPages <= 1) continue;
 
             // 并行翻页（子站内）
-            const LIST_PAGE_CONCURRENCY = 3;
+            const LIST_PAGE_CONCURRENCY = 5;
             const remainingPages = Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2);
 
             for (let pi = 0; pi < remainingPages.length; pi += LIST_PAGE_CONCURRENCY) {
@@ -534,7 +534,7 @@ export class AlibabaCrawler extends BaseCrawler {
 
               // 翻页批次间短延迟
               if (pi + LIST_PAGE_CONCURRENCY < remainingPages.length) {
-                await this.randomDelay(500, 1000);
+                await this.randomDelay(200, 500);
               }
             }
           }
@@ -556,17 +556,20 @@ export class AlibabaCrawler extends BaseCrawler {
 
       // 报告进度
       if (this.onProgress) {
-        this.onProgress(allJobs.length, 0, `已从 ${Math.min(i + SUBSITE_CONCURRENCY, SUBSITES.length)}/${SUBSITES.length} 个子站抓取 ${allJobs.length} 个岗位`);
+        this.onProgress(allJobs.length, 0, `已抓取 ${allJobs.length} 个职位（${Math.min(i + SUBSITE_CONCURRENCY, SUBSITES.length)}/${SUBSITES.length} 个子站）`);
       }
 
       // 子站批次间延迟
       if (i + SUBSITE_CONCURRENCY < SUBSITES.length && allJobs.length < maxJobs) {
-        await this.randomDelay(1000, 2000);
+        await this.randomDelay(500, 1000);
       }
     }
 
     console.log(`\n[阿里巴巴] 总计获取 ${allJobs.length} 个岗位`);
-    return maxJobs < Infinity ? allJobs.slice(0, maxJobs) : allJobs;
+
+    // 返回空数组：所有数据已通过 onJobsBatch 增量推送完成，
+    // 无需再经过 base.ts 的 crawlDetailsInParallel（避免重复推送）
+    return [];
   }
 
   /**
