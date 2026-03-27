@@ -43,7 +43,7 @@ export default function SourceSelector() {
                 variant={isSelected ? "outline" : "ghost"}
                 onPress={() => toggleSource(source.id)}
                 isDisabled={isRunning}
-                className={`w-full h-full rounded-xl border-2 p-4 justify-start transition-all ${
+                className={`w-full h-full border rounded-xl p-4 justify-start transition-all ${
                   isSelected
                     ? "border-primary bg-primary/5 shadow-sm"
                     : "border-border hover:border-primary/50"
@@ -60,7 +60,7 @@ export default function SourceSelector() {
                 <Button
                   variant="primary"
                   isIconOnly
-                  className="absolute right-4 top-1/2 -translate-y-1/2 h-8 w-8 min-w-8 cursor-pointer"
+                  className="absolute border right-4 top-1/2 -translate-y-1/2 h-8 w-8 min-w-8 cursor-pointer"
                   onPress={() => setDrawerSourceId(source.id)}
                   isDisabled={isRunning}
                 >
