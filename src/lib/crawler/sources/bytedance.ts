@@ -170,7 +170,6 @@ export class BytedanceCrawler extends BaseCrawler {
     logo: "https://lf-package-cn.feishucdn.com/obj/atsx-throne/hire-fe-prod/portal/mainland/favicon.ico",
     baseUrl: "https://jobs.bytedance.com",
     enabled: true,
-    description: "字节跳动（今日头条、抖音母公司）社会招聘",
   };
 
   /**

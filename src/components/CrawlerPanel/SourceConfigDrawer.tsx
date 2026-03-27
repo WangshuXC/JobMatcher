@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import {
+  Button,
   Checkbox,
   CheckboxGroup,
   Label,
@@ -10,7 +11,6 @@ import {
   Disclosure,
   DisclosureGroup,
 } from "@heroui/react";
-import { Button } from "@/components/ui/button";
 import { useCrawlerStore, KeywordConfig } from "@/stores/crawler-store";
 import { SOURCE_CATEGORIES } from "@/lib/crawler/categories";
 import { JobCategory } from "@/types";
@@ -312,13 +312,14 @@ export default function SourceConfigDrawer({
           <Drawer.Footer className="border-t border-border/50 flex gap-2 p-4">
             <Button
               variant="outline"
-              onClick={onClose}
+              onPress={onClose}
               className="cursor-pointer flex-1"
             >
               取消
             </Button>
             <Button
-              onClick={handleConfirm}
+              variant="primary"
+              onPress={handleConfirm}
               className="cursor-pointer flex-1"
             >
               确认

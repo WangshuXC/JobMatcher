@@ -1,8 +1,7 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Chip, Separator } from "@heroui/react";
+import { Button } from "@heroui/react";
 import {
   ModalBackdrop,
   ModalContainer,
@@ -51,7 +50,7 @@ export default function MatchDetailModal({
       isDismissable
       className="backdrop-blur-sm"
     >
-      <ModalContainer size="lg" scroll="inside">
+      <ModalContainer size="lg" scroll="outside">
         <ModalDialog>
           {selectedMatch && (
             <>
@@ -134,14 +133,18 @@ export default function MatchDetailModal({
 
                   {/* 职位信息 */}
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="secondary">
-                      <Building2 className="h-3 w-3 mr-1" />
-                      {selectedMatch.job.company}
-                    </Badge>
-                    <Badge variant="outline">
-                      <MapPin className="h-3 w-3 mr-1" />
-                      {selectedMatch.job.location}
-                    </Badge>
+                    <Chip  variant="secondary">
+                      <Chip.Label className="flex items-center gap-1">
+                        <Building2 className="h-3 w-3" />
+                        {selectedMatch.job.company}
+                      </Chip.Label>
+                    </Chip>
+                    <Chip  variant="primary">
+                      <Chip.Label className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />
+                        {selectedMatch.job.location}
+                      </Chip.Label>
+                    </Chip>
                   </div>
 
                   <div>
@@ -179,7 +182,7 @@ export default function MatchDetailModal({
               <ModalFooter>
                 <Button
                   variant="outline"
-                  onClick={onClose}
+                  onPress={onClose}
                   className="cursor-pointer"
                 >
                   关闭

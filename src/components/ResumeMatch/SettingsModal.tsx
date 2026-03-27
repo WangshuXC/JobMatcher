@@ -8,6 +8,9 @@ import {
   TextField,
   Chip,
   Spinner,
+  Select,
+  ListBox,
+  ListBoxItem,
   ModalBackdrop,
   ModalContainer,
   ModalDialog,
@@ -179,7 +182,7 @@ export default function SettingsModal({
                 <Spinner size="md" />
               </div>
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-5 p-2">
                 {/* 状态提示 */}
                 <div
                   className={`flex items-center gap-2 p-3 rounded-lg ${
@@ -276,22 +279,50 @@ export default function SettingsModal({
                   <div className="flex items-center gap-2">
                     <Label>模型名称</Label>
                     {selectedProvider !== "custom" && (
-                      <Chip size="sm" variant="secondary">
+                      <Chip  variant="secondary">
                         <Chip.Label>可选</Chip.Label>
                       </Chip>
                     )}
                   </div>
-                  <Input
-                    placeholder={`${selectedProvider === "custom" ? "必填，如 deepseek-v3-0324" : `默认: ${currentProvider?.defaultModel || ""}`}`}
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    autoComplete="off"
-                    fullWidth
-                  />
-                  {selectedProvider === "tencent-coding" && (
-                    <p className="text-xs text-neutral-400 mt-1">
-                      可用模型: hunyuan-turbos / hunyuan-t1 / hunyuan-2.0-instruct / hunyuan-2.0-thinking / minimax-m2.5 / kimi-k2.5 / glm-5 / tc-code-latest
-                    </p>
+                  {selectedProvider === "tencent-coding" ? (
+                    <Select
+                      aria-label="模型名称"
+                      selectedKey={model || null}
+                      onSelectionChange={(key) => setModel(key as string ?? "")}
+                      placeholder={`默认: ${currentProvider?.defaultModel || ""}`}
+                      fullWidth
+                    >
+                      <Select.Trigger className="cursor-pointer">
+                        <Select.Value />
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          {[
+                            "hunyuan-turbos",
+                            "hunyuan-t1",
+                            "hunyuan-2.0-instruct",
+                            "hunyuan-2.0-thinking",
+                            "minimax-m2.5",
+                            "kimi-k2.5",
+                            "glm-5",
+                            "tc-code-latest",
+                          ].map((m) => (
+                            <ListBoxItem key={m} id={m} textValue={m}>
+                              {m}
+                            </ListBoxItem>
+                          ))}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                  ) : (
+                    <Input
+                      placeholder={`${selectedProvider === "custom" ? "必填，如 deepseek-v3-0324" : `默认: ${currentProvider?.defaultModel || ""}`}`}
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      autoComplete="off"
+                      fullWidth
+                    />
                   )}
                 </TextField>
 
@@ -300,7 +331,7 @@ export default function SettingsModal({
                   <div className="flex items-center gap-2">
                     <Label>自定义 Base URL</Label>
                     {selectedProvider !== "custom" && (
-                      <Chip size="sm" variant="secondary">
+                      <Chip  variant="secondary">
                         <Chip.Label>可选</Chip.Label>
                       </Chip>
                     )}

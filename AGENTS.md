@@ -89,11 +89,11 @@ Pure rule-based, no AI model dependency:
 
 **Key UI pattern**: `refreshTrigger` is an incrementing counter in `jobStore`. When SSE receives new job data, it calls `triggerRefresh()` which increments the counter. `useJobs` hook watches this value in `useEffect` and re-fetches `/api/jobs`. This avoids directly mutating the full job list from SSE callbacks (since SSE sends incremental data but the list needs server-filtered complete views).
 
-**Component structure**: Each feature tab (CrawlerPanel, JobList, ResumeMatch) has its own directory with an `index.tsx` entry, a `use*.ts` business hook, and specialized child components. `src/components/ui/` contains 12 shadcn/ui base components.
+**Component structure**: Each feature tab (CrawlerPanel, JobList, ResumeMatch) has its own directory with an `index.tsx` entry, a `use*.ts` business hook, and specialized child components.
 
 **Virtual scrolling**: `VirtualJobList` uses `@tanstack/react-virtual` with fixed row height 134px, overscan 5.
 
-**UI libraries**: HeroUI (`@heroui/react`) + shadcn/ui + Tailwind CSS 4 + Motion (Framer Motion). The `Providers` component wraps only `I18nProvider` (locale="zh-CN").
+**UI libraries**: HeroUI (`@heroui/react`) + Tailwind CSS 4 + Motion (Framer Motion). The `Providers` component wraps only `I18nProvider` (locale="zh-CN"). All UI components come from HeroUI — shadcn/ui has been fully removed.
 
 ### Social/Campus Recruitment Isolation
 

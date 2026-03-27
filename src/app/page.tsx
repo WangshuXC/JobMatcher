@@ -9,7 +9,6 @@ import CrawlerPanel from "@/components/CrawlerPanel";
 import JobList from "@/components/JobList";
 import ResumeMatch from "@/components/ResumeMatch";
 import type { Key } from "react";
-import type { RecruitType } from "@/types";
 
 export default function HomePage() {
   const triggerRefresh = useJobStore((s) => s.triggerRefresh);
@@ -26,8 +25,8 @@ export default function HomePage() {
   );
 
   const handleRecruitTypeChange = useCallback(
-    (type: RecruitType) => {
-      setRecruitType(type);
+    (key: Key) => {
+      setRecruitType(key as "social" | "campus");
       triggerRefresh();
     },
     [setRecruitType, triggerRefresh]
@@ -49,30 +48,33 @@ export default function HomePage() {
             </div>
 
             {/* 社招/校招切换 */}
-            <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-muted/30 p-1">
-              <button
-                onClick={() => handleRecruitTypeChange("social")}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                  recruitType === "social"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Building2 className="h-3.5 w-3.5" />
-                <span>社招</span>
-              </button>
-              <button
-                onClick={() => handleRecruitTypeChange("campus")}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                  recruitType === "campus"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <GraduationCap className="h-3.5 w-3.5" />
-                <span>校招</span>
-              </button>
-            </div>
+            <Tabs
+              selectedKey={recruitType}
+              onSelectionChange={handleRecruitTypeChange}
+            >
+              <Tabs.ListContainer>
+                <Tabs.List aria-label="招聘类型切换">
+                  <Tabs.Tab id="social" className={`flex items-center gap-1.5 cursor-pointer ${
+                    recruitType === "social"
+                      ? "text-foreground shadow-sm"
+                      : "text-muted-foreground"
+                  }`}>
+                    <Tabs.Indicator />
+                    <Building2 className="h-3.5 w-3.5" />
+                    <span>社招</span>
+                  </Tabs.Tab>
+                  <Tabs.Tab id="campus" className={`flex items-center gap-1.5 cursor-pointer ${
+                    recruitType === "campus"
+                      ? "text-foreground shadow-sm"
+                      : "text-muted-foreground"
+                  }`}>
+                    <Tabs.Indicator />
+                    <GraduationCap className="h-3.5 w-3.5" />
+                    <span>校招</span>
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.ListContainer>
+            </Tabs>
           </div>
         </div>
       </header>
@@ -86,19 +88,19 @@ export default function HomePage() {
         >
           <Tabs.ListContainer>
             <Tabs.List aria-label="功能导航">
-              <Tabs.Tab id="crawler" className="flex items-center gap-2 text-foreground">
+              <Tabs.Tab id="crawler" className="flex items-center gap-2 text-foreground cursor-pointer">
                 <Tabs.Indicator />
                 <Bot className="h-4 w-4" />
                 <span className="hidden sm:inline">爬虫 Agent</span>
                 <span className="sm:hidden">爬虫</span>
               </Tabs.Tab>
-              <Tabs.Tab id="jobs" className="flex items-center gap-2 text-foreground">
+              <Tabs.Tab id="jobs" className="flex items-center gap-2 text-foreground cursor-pointer">
                 <Tabs.Indicator />
                 <Briefcase className="h-4 w-4" />
                 <span className="hidden sm:inline">职位列表</span>
                 <span className="sm:hidden">职位</span>
               </Tabs.Tab>
-              <Tabs.Tab id="match" className="flex items-center gap-2 text-foreground">
+              <Tabs.Tab id="match" className="flex items-center gap-2 text-foreground cursor-pointer">
                 <Tabs.Indicator />
                 <Brain className="h-4 w-4" />
                 <span className="hidden sm:inline">智能匹配</span>
@@ -120,13 +122,6 @@ export default function HomePage() {
           </Tabs.Panel>
         </Tabs>
       </div>
-
-      {/* Footer */}
-      <footer className="border-t border-border/50 mt-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 text-center text-sm text-muted-foreground">
-          <p>JobMatcher — 基于 Playwright 爬虫 Agent 的智能招聘匹配系统</p>
-        </div>
-      </footer>
     </main>
   );
 }

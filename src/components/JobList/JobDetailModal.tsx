@@ -1,8 +1,6 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Chip, Separator, Button } from "@heroui/react";
 import {
   ModalBackdrop,
   ModalContainer,
@@ -51,19 +49,24 @@ export default function JobDetailModal({
                 <div className="space-y-4">
                   {/* 基本信息 */}
                   <div className="flex flex-wrap gap-2">
-                    <Badge
+                    <Chip
+                      size="sm"
                       className={getSourceColor(selectedJob.source)}
                     >
-                      {getSourceName(selectedJob.source)}
-                    </Badge>
-                    <Badge variant="outline">
-                      <MapPin className="h-3 w-3 mr-1" />
-                      {selectedJob.location}
-                    </Badge>
-                    <Badge variant="outline">
-                      <Hash className="h-3 w-3 mr-1" />
-                      {selectedJob.sourceId}
-                    </Badge>
+                      <Chip.Label>{getSourceName(selectedJob.source)}</Chip.Label>
+                    </Chip>
+                    <Chip  variant="soft">
+                      <Chip.Label className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />
+                        {selectedJob.location}
+                      </Chip.Label>
+                    </Chip>
+                    <Chip  variant="soft">
+                      <Chip.Label className="flex items-center gap-1">
+                        <Hash className="h-3 w-3" />
+                        {selectedJob.sourceId}
+                      </Chip.Label>
+                    </Chip>
                   </div>
 
                   <Separator />
@@ -105,7 +108,7 @@ export default function JobDetailModal({
               <ModalFooter>
                 <Button
                   variant="outline"
-                  onClick={onClose}
+                  onPress={onClose}
                   className="cursor-pointer"
                 >
                   关闭

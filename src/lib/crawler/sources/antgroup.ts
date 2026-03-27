@@ -137,7 +137,6 @@ export class AntgroupCrawler extends BaseCrawler {
     logo: "https://gw.alipayobjects.com/mdn/rms_5c2e9d/afts/img/A*gGPpRZRr2WYAAAAAAAAAAAAAARQnAQ",
     baseUrl: "https://talent.antgroup.com",
     enabled: true,
-    description: "蚂蚁集团（支付宝母公司）社会招聘",
   };
 
   /**

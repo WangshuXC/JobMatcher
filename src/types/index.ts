@@ -49,8 +49,6 @@ export interface CrawlerSource {
   baseUrl: string;
   /** 是否启用 */
   enabled: boolean;
-  /** 描述信息 */
-  description: string;
 }
 
 /** 爬虫执行状态 */

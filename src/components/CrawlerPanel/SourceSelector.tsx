@@ -2,8 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { Building2, Settings2 } from "lucide-react";
-import { Button } from "@heroui/react";
-import { Badge } from "@/components/ui/badge";
+import { Button, Badge } from "@heroui/react";
 import { useCrawlerStore } from "@/stores/crawler-store";
 import { SOURCE_CATEGORIES } from "@/lib/crawler/categories";
 import SourceConfigDrawer from "./SourceConfigDrawer";
@@ -52,12 +51,7 @@ export default function SourceSelector() {
               >
                 <div className="flex items-center gap-3 w-full">
                   <Building2 className="h-5 w-5 text-muted-foreground shrink-0" />
-                  <div className="min-w-0 flex-1 text-left">
-                    <p className="font-semibold text-foreground">{source.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5 text-ellipsis overflow-hidden whitespace-nowrap">
-                      {source.description}
-                    </p>
-                  </div>
+                  <p className="text-base font-bold text-foreground">{source.name}</p>
                 </div>
               </Button>
 
@@ -73,9 +67,14 @@ export default function SourceSelector() {
                   <Settings2 className="h-4 w-4" />
                   {sourceSelectedCounts[source.id] > 0 && (
                     <Badge
-                      className="absolute -top-1.5 -right-1.5 text-[9px] px-1 h-3.5 min-w-3.5 flex items-center justify-center"
+                      color="accent"
+                      size="sm"
+                      placement="top-right"
+                      className="absolute -top-1.5 -right-1.5"
                     >
-                      {sourceSelectedCounts[source.id]}
+                      <Badge.Label>
+                        {sourceSelectedCounts[source.id]}
+                      </Badge.Label>
                     </Badge>
                   )}
                 </Button>

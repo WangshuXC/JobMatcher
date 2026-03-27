@@ -97,7 +97,6 @@ export class JDCrawler extends BaseCrawler {
     logo: "https://zhaopin.jd.com/favicon.ico",
     baseUrl: "https://zhaopin.jd.com",
     enabled: true,
-    description: "京东社会招聘 - 涵盖零售、物流、科技、健康等业务线",
   };
 
   // --- 私有辅助方法 ---

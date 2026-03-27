@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Badge } from "@/components/ui/badge";
+import { Chip } from "@heroui/react";
 import { Building2, MapPin, Hash } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
 import { getSourceName, getSourceColor } from "@/lib/crawler/source-meta";
@@ -81,11 +81,12 @@ export default function VirtualJobList({ onSelectJob }: VirtualJobListProps) {
                       </span>
                     </div>
                   </div>
-                  <Badge
+                  <Chip
+                    size="sm"
                     className={`shrink-0 ${getSourceColor(job.source)}`}
                   >
-                    {getSourceName(job.source)}
-                  </Badge>
+                    <Chip.Label>{getSourceName(job.source)}</Chip.Label>
+                  </Chip>
                 </div>
                 <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
                   {job.description.slice(0, 120)}...

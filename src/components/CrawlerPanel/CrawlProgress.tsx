@@ -1,8 +1,7 @@
 "use client";
 
-import { ProgressBar, Label } from "@heroui/react";
+import { ProgressBar, Label, Chip } from "@heroui/react";
 import { CheckCircle2, XCircle, Loader2, Clock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { useCrawlerStore, SourceProgress } from "@/stores/crawler-store";
 
 /** 格式化耗时 */
@@ -71,13 +70,17 @@ function SourceProgressItem({
           </div>
         </div>
 
-        {/* 右侧 Badge / 统计 */}
+        {/* 右侧 Chip / 统计 */}
         <div className="flex items-center gap-2">
           {(status === "completed" || status === "error") && (
-            <Badge variant="secondary">{jobCount} 个职位</Badge>
+            <Chip  variant="secondary">
+              <Chip.Label>{jobCount} 个职位</Chip.Label>
+            </Chip>
           )}
           {status === "completed" && duration != null && (
-            <Badge variant="outline">{formatDuration(duration)}</Badge>
+            <Chip  variant="soft">
+              <Chip.Label>{formatDuration(duration)}</Chip.Label>
+            </Chip>
           )}
           {status === "running" && jobCount > 0 && (
             <span className="text-xs text-muted-foreground">

@@ -149,7 +149,6 @@ export class MeituanCrawler extends BaseCrawler {
     logo: "https://s3plus.meituan.net/zhaopin-official-website-prod/imgs/favicon.ico",
     baseUrl: "https://zhaopin.meituan.com",
     enabled: true,
-    description: "美团社会招聘 - 涵盖外卖、到店、买菜、出行等业务线",
   };
 
   // --- 私有辅助方法 ---

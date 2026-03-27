@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@heroui/react";
 import { Play, Loader2 } from "lucide-react";
 import { useCrawlerStore } from "@/stores/crawler-store";
 
@@ -18,9 +18,10 @@ export default function CrawlButton({ onStartCrawl }: CrawlButtonProps) {
   return (
     <Button
       size="lg"
+      variant="primary"
       className="w-full text-base cursor-pointer"
-      onClick={onStartCrawl}
-      disabled={isRunning || selectedSources.length === 0}
+      onPress={onStartCrawl}
+      isDisabled={isRunning || selectedSources.length === 0}
     >
       {isRunning ? (
         <>

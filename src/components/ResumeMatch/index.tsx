@@ -1,8 +1,7 @@
 "use client";
 
-import { Card, CardHeader, CardContent, useOverlayState } from "@heroui/react";
+import { Card, CardHeader, CardContent, useOverlayState, Button } from "@heroui/react";
 import { Brain, Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useMatchStore } from "@/stores/match-store";
 import ResumeInput from "./ResumeInput";
 import ProfileCard from "./ProfileCard";
@@ -32,7 +31,7 @@ export default function ResumeMatch() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => settingsModal.open()}
+            onPress={() => settingsModal.open()}
             className="cursor-pointer text-muted-foreground hover:text-foreground"
           >
             <Settings className="h-4 w-4 mr-1" />

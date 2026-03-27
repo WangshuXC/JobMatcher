@@ -1,9 +1,11 @@
 "use client";
 
 import { motion, AnimatePresence } from "motion/react";
-import { Badge } from "@/components/ui/badge";
+import { Chip } from "@heroui/react";
 import { Target } from "lucide-react";
 import { useMatchStore } from "@/stores/match-store";
+
+const SKILL_NUM = 20;
 
 export default function ProfileCard() {
   const profile = useMatchStore((s) => s.profile);
@@ -24,15 +26,15 @@ export default function ProfileCard() {
             <div>
               <span className="text-muted-foreground">识别技能：</span>
               <div className="flex flex-wrap gap-1 mt-1">
-                {profile.skills.slice(0, 10).map((skill) => (
-                  <Badge key={skill} variant="secondary" className="text-xs">
-                    {skill}
-                  </Badge>
+                {profile.skills.slice(0, SKILL_NUM).map((skill) => (
+                  <Chip key={skill} variant="soft">
+                    <Chip.Label className="text-xs">{skill}</Chip.Label>
+                  </Chip>
                 ))}
-                {profile.skills.length > 10 && (
-                  <Badge variant="outline" className="text-xs">
-                    +{profile.skills.length - 10}
-                  </Badge>
+                {profile.skills.length > SKILL_NUM && (
+                  <Chip variant="soft">
+                    <Chip.Label className="text-xs">+{profile.skills.length - SKILL_NUM}</Chip.Label>
+                  </Chip>
                 )}
               </div>
             </div>

@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@heroui/styles"; 
 
 @custom-variant dark (&:is(.dark *));
@@ -50,9 +49,7 @@
 }
 
 :root {
-  /* 修复 HeroUI Input placeholder 颜色：HeroUI 用 --muted 作为 placeholder 文字色，
-     但 shadcn 的 --muted 是浅灰背景色(0.97)，导致 placeholder 几乎不可见。
-     覆盖为 --muted-foreground 使其变为合适的中灰色 */
+  /* 修复 HeroUI Input placeholder 颜色 */
   --field-placeholder: var(--muted-foreground);
 
   --background: oklch(1 0 0);

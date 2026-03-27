@@ -1,8 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "motion/react";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Chip, ScrollShadow } from "@heroui/react";
 import { TrendingUp, Star, Building2, MapPin } from "lucide-react";
 import { useMatchStore } from "@/stores/match-store";
 import { MatchResult } from "@/types";
@@ -37,7 +36,7 @@ export default function MatchResultList({ onSelectMatch }: MatchResultListProps)
             <TrendingUp className="h-4 w-4" />
             匹配结果（共 {results.length} 个推荐职位）
           </h3>
-          <ScrollArea className="h-100">
+          <ScrollShadow className="h-200" hideScrollBar={true}>
             <div className="space-y-3 pr-4">
               {results.map((match, index) => (
                 <motion.div
@@ -74,13 +73,15 @@ export default function MatchResultList({ onSelectMatch }: MatchResultListProps)
                         {/* 匹配理由 */}
                         <div className="flex flex-wrap gap-1 mt-2">
                           {match.reasons.slice(0, 2).map((reason, i) => (
-                            <Badge
+                            <Chip
                               key={i}
-                              variant="outline"
-                              className="text-xs"
+                              size="lg"
+                              variant="primary"
                             >
-                              {reason}
-                            </Badge>
+                              <Chip.Label className="text-xs">
+                                {reason}
+                              </Chip.Label>
+                            </Chip>
                           ))}
                         </div>
                       </div>
@@ -103,7 +104,7 @@ export default function MatchResultList({ onSelectMatch }: MatchResultListProps)
                 </motion.div>
               ))}
             </div>
-          </ScrollArea>
+          </ScrollShadow>
         </motion.div>
       )}
     </AnimatePresence>

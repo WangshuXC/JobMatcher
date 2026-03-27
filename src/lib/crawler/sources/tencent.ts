@@ -103,7 +103,6 @@ export class TencentCrawler extends BaseCrawler {
     logo: "https://careers.tencent.com/favicon.ico",
     baseUrl: "https://careers.tencent.com",
     enabled: true,
-    description: "腾讯社会招聘 - 涵盖微信、QQ、云计算等业务线",
   };
 
   /**

@@ -1,9 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, Checkbox, CheckboxGroup } from "@heroui/react";
 import { MapPin, ChevronDown, X } from "lucide-react";
-import { Checkbox, CheckboxGroup } from "@heroui/react";
 import { useJobStore } from "@/stores/job-store";
 import { getSourceName } from "@/lib/crawler/source-meta";
 
@@ -70,8 +69,8 @@ export default function SourceFilter({ onFilter }: SourceFilterProps) {
       {/* 公司选择 */}
       <Button
         size="sm"
-        variant={selectedSource === null ? "default" : "outline"}
-        onClick={() => {
+        variant={selectedSource === null ? "primary" : "outline"}
+        onPress={() => {
           setSelectedSource(null);
           setKeyword("");
           onFilter(null, selectedLocations);
@@ -84,8 +83,8 @@ export default function SourceFilter({ onFilter }: SourceFilterProps) {
         <Button
           key={source}
           size="sm"
-          variant={selectedSource === source ? "default" : "outline"}
-          onClick={() => {
+          variant={selectedSource === source ? "primary" : "outline"}
+          onPress={() => {
             setSelectedSource(source);
             onFilter(source, selectedLocations);
           }}

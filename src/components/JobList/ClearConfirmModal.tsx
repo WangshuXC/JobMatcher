@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@heroui/react";
 import {
   ModalBackdrop,
   ModalContainer,
@@ -51,16 +51,16 @@ export default function ClearConfirmModal({
           <ModalFooter>
             <Button
               variant="outline"
-              onClick={onClose}
-              disabled={clearing}
+              onPress={onClose}
+              isDisabled={clearing}
               className="cursor-pointer"
             >
               取消
             </Button>
             <Button
-              variant="destructive"
-              onClick={onConfirm}
-              disabled={clearing}
+              variant="danger"
+              onPress={onConfirm}
+              isDisabled={clearing}
               className="cursor-pointer"
             >
               {clearing ? "清除中..." : "确认清除"}

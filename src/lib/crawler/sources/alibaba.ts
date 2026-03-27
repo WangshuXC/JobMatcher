@@ -216,7 +216,6 @@ export class AlibabaCrawler extends BaseCrawler {
     logo: "https://talent.alibaba.com/favicon.ico",
     baseUrl: "https://talent.alibaba.com",
     enabled: true,
-    description: "阿里巴巴集团社会招聘 - 涵盖阿里云、淘天、国际商业、菜鸟等子集团",
   };
 
   /**

@@ -1,7 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
+import { Button, Slider } from "@heroui/react";
 import { useCrawlerStore } from "@/stores/crawler-store";
 
 const SLIDER_MAX = 500;
@@ -35,15 +34,21 @@ export default function MaxJobsControl() {
       {!isAllMode && (
         <Slider
           value={[maxJobs]}
-          onValueChange={(values) =>
-            setMaxJobs(Array.isArray(values) ? values[0] : values)
+          onChange={(value) =>
+            setMaxJobs(Array.isArray(value) ? value[0] : value)
           }
-          min={1}
-          max={SLIDER_MAX}
+          minValue={1}
+          maxValue={SLIDER_MAX}
           step={getSliderStep()}
-          disabled={isRunning}
+          isDisabled={isRunning}
           className="w-full"
-        />
+          aria-label="抓取岗位数量"
+        >
+          <Slider.Track>
+            <Slider.Fill />
+            <Slider.Thumb />
+          </Slider.Track>
+        </Slider>
       )}
 
       {/* 快捷按钮 + 岗位配置 */}
@@ -51,9 +56,9 @@ export default function MaxJobsControl() {
         <div className="flex flex-wrap items-center gap-2 flex-1">
           <Button
             size="sm"
-            variant={isAllMode ? "default" : "outline"}
-            onClick={() => setMaxJobs(0)}
-            disabled={isRunning}
+            variant={isAllMode ? "primary" : "outline"}
+            onPress={() => setMaxJobs(0)}
+            isDisabled={isRunning}
             className="cursor-pointer text-xs px-3"
           >
             全部
@@ -62,9 +67,9 @@ export default function MaxJobsControl() {
             <Button
               key={n}
               size="sm"
-              variant={!isAllMode && maxJobs === n ? "default" : "outline"}
-              onClick={() => setMaxJobs(n)}
-              disabled={isRunning}
+              variant={!isAllMode && maxJobs === n ? "primary" : "outline"}
+              onPress={() => setMaxJobs(n)}
+              isDisabled={isRunning}
               className="cursor-pointer text-xs px-3"
             >
               {n} 个
