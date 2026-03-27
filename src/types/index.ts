@@ -161,6 +161,8 @@ export interface CrawlRequest {
 export interface MatchRequest {
   resumeText: string;
   topN?: number;
+  /** 是否使用 LLM 精排（需配置 API Key） */
+  useLLM?: boolean;
 }
 
 /** API 通用响应 */
@@ -168,4 +170,59 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+// ==================== AI / LLM 配置相关类型 ====================
+
+/** 支持的 LLM Provider */
+export type LLMProvider = "openai" | "deepseek" | "zhipu" | "qwen" | "tencent-coding" | "custom";
+
+/** LLM 配置信息 */
+export interface LLMConfig {
+  /** 选中的 Provider */
+  provider: LLMProvider;
+  /** API Key */
+  apiKey: string;
+  /** 模型名称（可选，各 Provider 有默认值） */
+  model?: string;
+  /** 自定义 Base URL（可选） */
+  baseURL?: string;
+}
+
+/** AI 设置（持久化到文件） */
+export interface AISettings {
+  /** LLM 配置 */
+  llm?: LLMConfig;
+}
+
+/** Provider 默认配置 */
+export interface ProviderDefaults {
+  id: LLMProvider;
+  name: string;
+  defaultModel: string;
+  defaultBaseURL?: string;
+  placeholder: string;
+}
+
+/** LLM 精排后的匹配结果 */
+export interface LLMMatchResult {
+  /** 职位原始 ID（用于关联） */
+  jobId: string;
+  /** LLM 综合评分 0-100 */
+  score: number;
+  /** LLM 生成的匹配理由 */
+  reason: string;
+  /** 亮点分析 */
+  highlights: string[];
+  /** 风险/不足 */
+  risks: string[];
+}
+
+/** 智能匹配 SSE 事件类型 */
+export type SmartMatchEventType = "embedding_start" | "embedding_done" | "llm_start" | "llm_progress" | "llm_done" | "error";
+
+/** 智能匹配 SSE 事件 */
+export interface SmartMatchEvent {
+  type: SmartMatchEventType;
+  data: unknown;
 }

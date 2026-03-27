@@ -2,7 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Sparkles, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { FileText, Sparkles, Loader2, Cpu, Zap } from "lucide-react";
 import { useMatchStore } from "@/stores/match-store";
 import { SAMPLE_RESUME } from "./constants";
 
@@ -14,6 +15,8 @@ export default function ResumeInput({ onMatch }: ResumeInputProps) {
   const resumeText = useMatchStore((s) => s.resumeText);
   const isMatching = useMatchStore((s) => s.isMatching);
   const error = useMatchStore((s) => s.error);
+  const progressMessage = useMatchStore((s) => s.progressMessage);
+  const matchMethod = useMatchStore((s) => s.matchMethod);
   const setResumeText = useMatchStore((s) => s.setResumeText);
 
   return (
@@ -62,6 +65,41 @@ export default function ResumeInput({ onMatch }: ResumeInputProps) {
           </>
         )}
       </Button>
+
+      {/* 进度消息 */}
+      {isMatching && progressMessage && (
+        <div className="flex items-center gap-2 justify-center text-sm text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {progressMessage}
+        </div>
+      )}
+
+      {/* 匹配方法标签 */}
+      {matchMethod && !isMatching && (
+        <div className="flex items-center justify-center gap-2">
+          <Badge
+            variant="secondary"
+            className="text-xs"
+          >
+            {matchMethod === "embedding+llm" ? (
+              <>
+                <Zap className="h-3 w-3 mr-1" />
+                语义召回 + AI 精排
+              </>
+            ) : matchMethod === "embedding+rule" ? (
+              <>
+                <Cpu className="h-3 w-3 mr-1" />
+                语义召回 + 规则匹配
+              </>
+            ) : (
+              <>
+                <Cpu className="h-3 w-3 mr-1" />
+                规则匹配
+              </>
+            )}
+          </Badge>
+        </div>
+      )}
 
       {error && (
         <p className="text-sm text-destructive text-center">{error}</p>

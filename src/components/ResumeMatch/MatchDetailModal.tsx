@@ -42,6 +42,7 @@ export default function MatchDetailModal({
   onClose,
 }: MatchDetailModalProps) {
   const selectedMatch = useMatchStore((s) => s.selectedMatch);
+  const matchMethod = useMatchStore((s) => s.matchMethod);
 
   return (
     <ModalBackdrop
@@ -73,7 +74,9 @@ export default function MatchDetailModal({
                         {selectedMatch.score}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        总匹配度
+                        {matchMethod === "embedding+llm"
+                          ? "AI 评分"
+                          : "总匹配度"}
                       </p>
                     </div>
                     <div className="flex-1 space-y-2">
@@ -101,16 +104,26 @@ export default function MatchDetailModal({
                     </div>
                   </div>
 
-                  {/* 匹配理由 */}
+                  {/* 匹配分析 */}
                   <div>
-                    <h4 className="font-semibold text-foreground/80 mb-2">匹配分析</h4>
-                    <div className="space-y-1">
+                    <h4 className="font-semibold text-foreground/80 mb-2">
+                      {matchMethod === "embedding+llm" ? "AI 匹配分析" : "匹配分析"}
+                    </h4>
+                    <div className="space-y-1.5">
                       {selectedMatch.reasons.map((reason, i) => (
                         <p
                           key={i}
-                          className="text-sm text-muted-foreground flex items-start gap-2"
+                          className={`text-sm flex items-start gap-2 ${
+                            reason.startsWith("✅")
+                              ? "text-green-600"
+                              : reason.startsWith("⚠️")
+                              ? "text-amber-600"
+                              : "text-muted-foreground"
+                          }`}
                         >
-                          <span className="text-primary mt-0.5">•</span>
+                          {!reason.startsWith("✅") && !reason.startsWith("⚠️") && (
+                            <span className="text-primary mt-0.5">•</span>
+                          )}
                           {reason}
                         </p>
                       ))}

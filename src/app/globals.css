@@ -50,6 +50,11 @@
 }
 
 :root {
+  /* 修复 HeroUI Input placeholder 颜色：HeroUI 用 --muted 作为 placeholder 文字色，
+     但 shadcn 的 --muted 是浅灰背景色(0.97)，导致 placeholder 几乎不可见。
+     覆盖为 --muted-foreground 使其变为合适的中灰色 */
+  --field-placeholder: var(--muted-foreground);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -85,6 +90,8 @@
 }
 
 .dark {
+  --field-placeholder: var(--muted-foreground);
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

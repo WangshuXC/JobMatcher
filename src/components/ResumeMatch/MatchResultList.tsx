@@ -41,7 +41,7 @@ export default function MatchResultList({ onSelectMatch }: MatchResultListProps)
             <div className="space-y-3 pr-4">
               {results.map((match, index) => (
                 <motion.div
-                  key={match.job.id}
+                  key={match.job.id + index}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: Math.min(index * 0.05, 0.5) }}
