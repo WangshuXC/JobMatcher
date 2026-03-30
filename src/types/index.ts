@@ -141,6 +141,42 @@ export interface JobCategory {
  */
 export type CategoryConfig = Record<string, string[]>;
 
+// ==================== 搜索相关类型 ====================
+
+/** 解析后的搜索查询结构 */
+export interface SearchQuery {
+  /** 必须包含的关键字（AND/OR 取决于 operator） */
+  include: string[];
+  /** 必须排除的关键字 */
+  exclude: string[];
+  /** 包含关键字之间的逻辑关系 */
+  operator: "AND" | "OR";
+  /** 原始输入文本（用于语义搜索） */
+  rawQuery: string;
+}
+
+/** 搜索模式 */
+export type SearchMode = "keyword" | "semantic";
+
+/** 排序方式 */
+export type SortBy = "relevance" | "time";
+
+/** 地点分组 */
+export interface LocationGroup {
+  label: string;
+  locations: { name: string; count: number }[];
+}
+
+/** Jobs API 响应 */
+export interface JobsApiResponse {
+  jobs: JobPosting[];
+  total: number;
+  countBySource: Record<string, number>;
+  locationGroups: LocationGroup[];
+  /** 语义搜索模式下，各职位的语义相似度分数 (key 为 job dedup key) */
+  semanticScores?: Record<string, number>;
+}
+
 // ==================== API 相关类型 ====================
 
 /** 爬虫请求参数 */

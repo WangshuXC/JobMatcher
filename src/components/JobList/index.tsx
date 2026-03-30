@@ -5,6 +5,7 @@ import { Briefcase, Trash2, Loader2, EllipsisVertical } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
 import SearchBar from "./SearchBar";
 import SourceFilter from "./SourceFilter";
+import SortControl from "./SortControl";
 import VirtualJobList from "./VirtualJobList";
 import JobDetailModal from "./JobDetailModal";
 import ClearConfirmModal from "./ClearConfirmModal";
@@ -77,6 +78,7 @@ export default function JobList() {
             }
           />
           <SourceFilter onFilter={handleFilter} />
+          <SortControl />
 
           {/* 职位列表 */}
           {initialLoading ? (

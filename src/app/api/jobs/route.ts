@@ -2,7 +2,14 @@
  * GET /api/jobs - 查询职位列表
  * DELETE /api/jobs - 清除所有职位数据
  *
- * Query: ?source=xxx&keyword=xxx&location=city1,city2,...（多选，逗号分隔）
+ * Query 参数:
+ *   - source: 数据源筛选
+ *   - keyword: 单关键字搜索（向后兼容）
+ *   - keywords: JSON 编码的多关键字搜索 { include: string[], exclude: string[], operator: "AND"|"OR" }
+ *   - location: 地点筛选（多选，逗号分隔）
+ *   - recruitType: 招聘类型
+ *   - mode: 搜索模式 "keyword"（默认）| "semantic"
+ *   - query: 语义搜索的查询文本
  */
 import { NextRequest, NextResponse } from "next/server";
 import { jobStore } from "@/lib/store";
@@ -11,6 +18,8 @@ import {
   isChinaLocation,
   getProvince,
 } from "@/lib/china-location";
+import { embed } from "@/lib/ai/embedding";
+import { embeddingStore } from "@/lib/ai/embedding-store";
 
 // ==================== 地名工具函数 ====================
 
@@ -127,13 +136,54 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const source = searchParams.get("source");
   const keyword = searchParams.get("keyword");
-  const locationParam = searchParams.get("location"); // 逗号分隔的多选
+  const keywordsJson = searchParams.get("keywords");
+  const locationParam = searchParams.get("location");
   const recruitType = (searchParams.get("recruitType") || "social") as RecruitType;
+  const mode = searchParams.get("mode") || "keyword";
+  const query = searchParams.get("query");
 
-  // --- 第一步：按 source + keyword 得到基础结果 ---
-  let baseJobs;
+  // --- 语义搜索模式 ---
+  if (mode === "semantic" && query) {
+    try {
+      return await handleSemanticSearch({
+        query,
+        source,
+        keywordsJson,
+        keyword,
+        locationParam,
+        recruitType,
+      });
+    } catch (err) {
+      console.error("[API/jobs] 语义搜索失败，降级到关键字搜索:", err);
+    }
+  }
 
-  if (keyword) {
+  // --- 关键字搜索模式 ---
+  let baseJobs: JobPosting[];
+
+  if (keywordsJson) {
+    try {
+      const parsed = JSON.parse(keywordsJson) as {
+        include: string[];
+        exclude: string[];
+        operator: "AND" | "OR";
+      };
+      baseJobs = jobStore.searchMulti(
+        parsed.include || [],
+        parsed.exclude || [],
+        parsed.operator || "AND",
+        recruitType
+      );
+      if (source) {
+        baseJobs = baseJobs.filter((j) => j.source === source);
+      }
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid keywords JSON" },
+        { status: 400 }
+      );
+    }
+  } else if (keyword) {
     baseJobs = jobStore.search(keyword, recruitType);
     if (source) {
       baseJobs = baseJobs.filter((j) => j.source === source);
@@ -143,6 +193,108 @@ export async function GET(req: NextRequest) {
   } else {
     baseJobs = jobStore.getAll(recruitType);
   }
+
+  return buildResponse(baseJobs, { keywordsJson, keyword, locationParam, recruitType });
+}
+
+// ==================== 语义搜索 ====================
+
+async function handleSemanticSearch(params: {
+  query: string;
+  source: string | null;
+  keywordsJson: string | null;
+  keyword: string | null;
+  locationParam: string | null;
+  recruitType: RecruitType;
+}) {
+  const { query, source, keywordsJson, keyword, locationParam, recruitType } = params;
+
+  // 1. 获取候选职位 key 列表
+  let candidateKeys = jobStore.getAllKeys(recruitType);
+  if (source) {
+    const sourceJobs = jobStore.getBySource(source, recruitType);
+    const sourceKeySet = new Set(
+      sourceJobs.map((j) => `${j.recruitType || "social"}_${j.source}_${j.sourceId}`)
+    );
+    candidateKeys = candidateKeys.filter((k) => sourceKeySet.has(k));
+  }
+
+  // 2. 将查询文本转为 embedding 向量
+  const queryVector = await embed(query);
+
+  // 3. 语义召回 Top 100
+  const recalled = embeddingStore.recall(queryVector, candidateKeys, 100);
+
+  // 4. 构建语义分数 Map 并获取召回职位
+  const semanticScores: Record<string, number> = {};
+  const recalledKeys: string[] = [];
+  for (const { key, similarity } of recalled) {
+    semanticScores[key] = similarity;
+    recalledKeys.push(key);
+  }
+
+  let recalledJobs = jobStore.getByKeys(recalledKeys, recruitType);
+
+  // 5. 如有关键字，在召回集上叠加关键字过滤
+  if (keywordsJson) {
+    try {
+      const parsed = JSON.parse(keywordsJson) as {
+        include: string[];
+        exclude: string[];
+        operator: "AND" | "OR";
+      };
+      const includeLower = (parsed.include || []).map((kw: string) => kw.toLowerCase());
+      const excludeLower = (parsed.exclude || []).map((kw: string) => kw.toLowerCase());
+      const op = parsed.operator || "AND";
+
+      recalledJobs = recalledJobs.filter((j) => {
+        const text = `${j.title} ${j.description} ${j.requirements} ${j.location}`.toLowerCase();
+        if (excludeLower.some((kw: string) => text.includes(kw))) return false;
+        if (includeLower.length === 0) return true;
+        return op === "AND"
+          ? includeLower.every((kw: string) => text.includes(kw))
+          : includeLower.some((kw: string) => text.includes(kw));
+      });
+    } catch {
+      // ignore parse error
+    }
+  } else if (keyword) {
+    const kw = keyword.toLowerCase();
+    recalledJobs = recalledJobs.filter((j) => {
+      const text = `${j.title} ${j.description} ${j.requirements} ${j.location}`.toLowerCase();
+      return text.includes(kw);
+    });
+  }
+
+  // 6. 按语义相似度排序
+  recalledJobs.sort((a, b) => {
+    const keyA = `${a.recruitType || "social"}_${a.source}_${a.sourceId}`;
+    const keyB = `${b.recruitType || "social"}_${b.source}_${b.sourceId}`;
+    return (semanticScores[keyB] || 0) - (semanticScores[keyA] || 0);
+  });
+
+  return buildResponse(recalledJobs, {
+    keywordsJson,
+    keyword,
+    locationParam,
+    recruitType,
+    semanticScores,
+  });
+}
+
+// ==================== 公共响应构建 ====================
+
+function buildResponse(
+  baseJobs: JobPosting[],
+  params: {
+    keywordsJson?: string | null;
+    keyword?: string | null;
+    locationParam?: string | null;
+    recruitType: RecruitType;
+    semanticScores?: Record<string, number>;
+  }
+) {
+  const { keywordsJson, keyword, locationParam, recruitType, semanticScores } = params;
 
   // --- 第二步：从 baseJobs 中提取地点列表（拆分归一化后去重计数） ---
   const locationCounts: Record<string, number> = {};
@@ -164,8 +316,24 @@ export async function GET(req: NextRequest) {
   }
 
   // --- 第四步：从最终 jobs 中动态计算各数据源数量 ---
-  let jobsForSourceCount;
-  if (keyword) {
+  let jobsForSourceCount: JobPosting[];
+  if (keywordsJson) {
+    try {
+      const parsed = JSON.parse(keywordsJson) as {
+        include: string[];
+        exclude: string[];
+        operator: "AND" | "OR";
+      };
+      jobsForSourceCount = jobStore.searchMulti(
+        parsed.include || [],
+        parsed.exclude || [],
+        parsed.operator || "AND",
+        recruitType
+      );
+    } catch {
+      jobsForSourceCount = jobStore.getAll(recruitType);
+    }
+  } else if (keyword) {
     jobsForSourceCount = jobStore.search(keyword, recruitType);
   } else {
     jobsForSourceCount = jobStore.getAll(recruitType);
@@ -188,6 +356,7 @@ export async function GET(req: NextRequest) {
       total: jobs.length,
       countBySource: filteredCountBySource,
       locationGroups,
+      ...(semanticScores ? { semanticScores } : {}),
     },
   });
 }

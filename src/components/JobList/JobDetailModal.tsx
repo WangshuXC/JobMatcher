@@ -14,6 +14,26 @@ import {
 import { MapPin, ExternalLink, Hash } from "lucide-react";
 import { useJobStore } from "@/stores/job-store";
 import { getSourceName, getSourceColor } from "@/lib/crawler/source-meta";
+import { highlightText } from "@/lib/search-utils";
+import type { HighlightSegment } from "@/lib/search-utils";
+import { useMemo } from "react";
+
+/** 渲染高亮文本片段 */
+function HighlightedText({ segments }: { segments: HighlightSegment[] }) {
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.highlighted ? (
+          <mark key={i} className="bg-warning/30 text-foreground rounded-sm px-0.5">
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        )
+      )}
+    </>
+  );
+}
 
 interface JobDetailModalProps {
   isOpen: boolean;
@@ -27,6 +47,12 @@ export default function JobDetailModal({
   onClose,
 }: JobDetailModalProps) {
   const selectedJob = useJobStore((s) => s.selectedJob);
+  const parsedKeywords = useJobStore((s) => s.parsedKeywords);
+
+  const highlightKeywords = useMemo(
+    () => parsedKeywords?.include ?? [],
+    [parsedKeywords]
+  );
 
   return (
     <ModalBackdrop
@@ -41,7 +67,13 @@ export default function JobDetailModal({
             <>
               <HModalHeader>
                 <ModalHeading className="text-xl">
-                  {selectedJob.title}
+                  {highlightKeywords.length > 0 ? (
+                    <HighlightedText
+                      segments={highlightText(selectedJob.title, highlightKeywords)}
+                    />
+                  ) : (
+                    selectedJob.title
+                  )}
                 </ModalHeading>
                 <ModalCloseTrigger />
               </HModalHeader>
@@ -75,7 +107,13 @@ export default function JobDetailModal({
                   <div>
                     <h4 className="font-semibold text-foreground/80 mb-2">职位描述</h4>
                     <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                      {selectedJob.description}
+                      {highlightKeywords.length > 0 ? (
+                        <HighlightedText
+                          segments={highlightText(selectedJob.description, highlightKeywords)}
+                        />
+                      ) : (
+                        selectedJob.description
+                      )}
                     </p>
                   </div>
 
@@ -85,7 +123,13 @@ export default function JobDetailModal({
                       <div>
                         <h4 className="font-semibold text-foreground/80 mb-2">职位要求</h4>
                         <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                          {selectedJob.requirements}
+                          {highlightKeywords.length > 0 ? (
+                            <HighlightedText
+                              segments={highlightText(selectedJob.requirements, highlightKeywords)}
+                            />
+                          ) : (
+                            selectedJob.requirements
+                          )}
                         </p>
                       </div>
                     </>

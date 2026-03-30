@@ -101,7 +101,7 @@ class JobStore {
     return this.getAll(recruitType).filter((j) => j.source === source);
   }
 
-  /** 搜索职位（可选按 recruitType 筛选） */
+  /** 搜索职位（单关键字，保留向后兼容） */
   search(keyword: string, recruitType?: RecruitType): JobPosting[] {
     const kw = keyword.toLowerCase();
     return this.getAll(recruitType).filter(
@@ -111,6 +111,84 @@ class JobStore {
         j.requirements.toLowerCase().includes(kw) ||
         j.location.toLowerCase().includes(kw)
     );
+  }
+
+  /**
+   * 多关键字搜索（支持 AND/OR 逻辑 + 排除关键字）
+   *
+   * @param include - 包含关键字列表
+   * @param exclude - 排除关键字列表
+   * @param operator - "AND"（全部匹配）或 "OR"（任一匹配）
+   * @param recruitType - 可选的招聘类型筛选
+   */
+  searchMulti(
+    include: string[],
+    exclude: string[],
+    operator: "AND" | "OR",
+    recruitType?: RecruitType
+  ): JobPosting[] {
+    const jobs = this.getAll(recruitType);
+
+    // 无有效关键字时返回全量
+    if (include.length === 0 && exclude.length === 0) {
+      return jobs;
+    }
+
+    const includeLower = include.map((kw) => kw.toLowerCase());
+    const excludeLower = exclude.map((kw) => kw.toLowerCase());
+
+    return jobs.filter((j) => {
+      const searchText = `${j.title} ${j.description} ${j.requirements} ${j.location}`.toLowerCase();
+
+      // 先检查排除条件：任一排除关键字匹配则过滤掉
+      if (excludeLower.some((kw) => searchText.includes(kw))) {
+        return false;
+      }
+
+      // 无包含关键字时（仅排除模式），通过排除检查即保留
+      if (includeLower.length === 0) {
+        return true;
+      }
+
+      // AND：所有包含关键字都要匹配
+      if (operator === "AND") {
+        return includeLower.every((kw) => searchText.includes(kw));
+      }
+
+      // OR：任一包含关键字匹配即可
+      return includeLower.some((kw) => searchText.includes(kw));
+    });
+  }
+
+  /**
+   * 获取指定 key 列表对应的职位（用于语义搜索召回后取回完整数据）
+   */
+  getByKeys(keys: string[], recruitType?: RecruitType): JobPosting[] {
+    this.loadFromFile();
+    const result: JobPosting[] = [];
+    for (const key of keys) {
+      const job = this.jobs.get(key);
+      if (job) {
+        if (!recruitType || (job.recruitType || "social") === recruitType) {
+          result.push(job);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 获取所有职位的 key 列表（用于语义搜索的候选集）
+   */
+  getAllKeys(recruitType?: RecruitType): string[] {
+    this.loadFromFile();
+    const keys: string[] = [];
+    for (const [key, job] of this.jobs.entries()) {
+      if (!recruitType || (job.recruitType || "social") === recruitType) {
+        keys.push(key);
+      }
+    }
+    return keys;
   }
 
   /** 获取职位总数（可选按 recruitType 筛选） */

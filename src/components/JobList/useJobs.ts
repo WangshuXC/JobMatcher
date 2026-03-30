@@ -3,11 +3,13 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useJobStore } from "@/stores/job-store";
 import { useAppStore } from "@/stores/app-store";
+import { parseSearchInput, serializeSearchQuery, isEmptyQuery } from "@/lib/search-utils";
 
 /**
  * JobList 业务逻辑 hook
  * - 初始加载 & refreshTrigger 变化时拉取数据
- * - 搜索 / 筛选
+ * - 多关键字搜索 / 语义搜索
+ * - 按数据源/地点筛选
  * - 清除全部数据
  */
 export function useJobs() {
@@ -16,28 +18,77 @@ export function useJobs() {
     keyword,
     selectedLocations,
     refreshTrigger,
+    searchMode,
+    parsedKeywords,
     setInitialLoading,
     setJobData,
     setClearing,
+    setSearchLoading,
+    setParsedKeywords,
     clearAll,
   } = useJobStore();
 
   const recruitType = useAppStore((s) => s.recruitType);
 
-  // 用 ref 保存当前筛选条件，以便 refreshTrigger 触发时能读取最新值
-  const filtersRef = useRef({ source: selectedSource, keyword, locations: selectedLocations, recruitType });
+  // 用 ref 保存当前筛选条件
+  const filtersRef = useRef({
+    source: selectedSource,
+    keyword,
+    locations: selectedLocations,
+    recruitType,
+    searchMode,
+    parsedKeywords,
+  });
   useEffect(() => {
-    filtersRef.current = { source: selectedSource, keyword, locations: selectedLocations, recruitType };
-  }, [selectedSource, keyword, selectedLocations, recruitType]);
+    filtersRef.current = {
+      source: selectedSource,
+      keyword,
+      locations: selectedLocations,
+      recruitType,
+      searchMode,
+      parsedKeywords,
+    };
+  }, [selectedSource, keyword, selectedLocations, recruitType, searchMode, parsedKeywords]);
+
+  /** 构建搜索参数 */
+  const buildSearchParams = useCallback(
+    (
+      source: string | null,
+      kw: string,
+      locations: string[],
+      opts?: { mode?: string; query?: string }
+    ) => {
+      const params = new URLSearchParams();
+      if (source) params.set("source", source);
+      if (locations.length > 0) params.set("location", locations.join(","));
+      params.set("recruitType", filtersRef.current.recruitType);
+
+      // 解析多关键字
+      const parsed = parseSearchInput(kw);
+      if (!isEmptyQuery(parsed)) {
+        params.set("keywords", serializeSearchQuery(parsed));
+      }
+
+      // 语义搜索模式
+      if (opts?.mode === "semantic" && opts?.query) {
+        params.set("mode", "semantic");
+        params.set("query", opts.query);
+      }
+
+      return params;
+    },
+    []
+  );
 
   /** 通用请求函数 */
   const fetchJobs = useCallback(
-    async (source: string | null, kw: string, locations: string[]) => {
-      const params = new URLSearchParams();
-      if (source) params.set("source", source);
-      if (kw) params.set("keyword", kw);
-      if (locations.length > 0) params.set("location", locations.join(","));
-      params.set("recruitType", filtersRef.current.recruitType);
+    async (
+      source: string | null,
+      kw: string,
+      locations: string[],
+      opts?: { mode?: string; query?: string }
+    ) => {
+      const params = buildSearchParams(source, kw, locations, opts);
 
       const response = await fetch(`/api/jobs?${params.toString()}`);
       const data = await response.json();
@@ -46,10 +97,11 @@ export function useJobs() {
           jobs: data.data.jobs,
           countBySource: data.data.countBySource,
           locationGroups: data.data.locationGroups || [],
+          semanticScores: data.data.semanticScores,
         });
       }
     },
-    [setJobData]
+    [buildSearchParams, setJobData]
   );
 
   // 组件挂载和 refreshTrigger 变化时拉取数据
@@ -61,7 +113,12 @@ export function useJobs() {
       const { source, keyword: kw, locations, recruitType: rt } = filtersRef.current;
       const params = new URLSearchParams();
       if (source) params.set("source", source);
-      if (kw) params.set("keyword", kw);
+      if (kw) {
+        const parsed = parseSearchInput(kw);
+        if (!isEmptyQuery(parsed)) {
+          params.set("keywords", serializeSearchQuery(parsed));
+        }
+      }
       if (locations.length > 0) params.set("location", locations.join(","));
       params.set("recruitType", rt);
 
@@ -73,6 +130,7 @@ export function useJobs() {
             jobs: data.data.jobs,
             countBySource: data.data.countBySource,
             locationGroups: data.data.locationGroups || [],
+            semanticScores: data.data.semanticScores,
           });
         }
       } finally {
@@ -86,16 +144,43 @@ export function useJobs() {
     };
   }, [refreshTrigger, recruitType, setInitialLoading, setJobData]);
 
-  /** 搜索 */
-  const handleSearch = useCallback(() => {
-    const { source, keyword: kw, locations } = filtersRef.current;
-    fetchJobs(source, kw, locations);
-  }, [fetchJobs]);
+  /** 搜索（手动触发） */
+  const handleSearch = useCallback(async () => {
+    const { source, keyword: kw, locations, searchMode: mode } = filtersRef.current;
+
+    // 更新解析后的关键字
+    const parsed = parseSearchInput(kw);
+    setParsedKeywords(!isEmptyQuery(parsed) ? parsed : null);
+
+    if (mode === "semantic" && kw.trim()) {
+      // 语义搜索模式
+      setSearchLoading(true);
+      try {
+        await fetchJobs(source, kw, locations, {
+          mode: "semantic",
+          query: kw.trim(),
+        });
+      } finally {
+        setSearchLoading(false);
+      }
+    } else {
+      // 关键字搜索模式
+      await fetchJobs(source, kw, locations);
+    }
+  }, [fetchJobs, setParsedKeywords, setSearchLoading]);
 
   /** 按数据源/地点筛选 */
   const handleFilter = useCallback(
     (source: string | null, locations: string[]) => {
-      fetchJobs(source, filtersRef.current.keyword, locations);
+      const { keyword: kw, searchMode: mode } = filtersRef.current;
+      if (mode === "semantic" && kw.trim()) {
+        fetchJobs(source, kw, locations, {
+          mode: "semantic",
+          query: kw.trim(),
+        });
+      } else {
+        fetchJobs(source, kw, locations);
+      }
     },
     [fetchJobs]
   );
